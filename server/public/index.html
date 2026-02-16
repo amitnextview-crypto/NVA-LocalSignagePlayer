@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Signage CMS</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+<div class="container">
+
+  <h1>📺 Digital Signage CMS</h1>
+
+  <!-- Upload Card -->
+  <div class="card">
+  <h2>Upload Media</h2>
+  <div id="uploadSections"></div>
+</div>
+
+
+  <!-- Settings Card -->
+  <div class="card">
+    <h2>Player Settings</h2>
+
+    <div class="form-grid">
+
+      <label>Layout</label>
+   <select id="layout">
+  <option value="fullscreen">Fullscreen</option>
+  <option value="grid2">Grid (2 Split)</option>
+  <option value="grid3">Grid (3 Split)</option>
+</select>
+
+<label>Screen Orientation</label>
+<select id="orientation">
+  <option value="horizontal">Horizontal (Landscape)</option>
+  <option value="vertical">Vertical (Portrait)</option>
+</select>
+
+      <label>Slide Duration (sec)</label>
+      <input id="duration" type="number" />
+
+      <label>Animation</label>
+      <select id="animation">
+       
+        <option value="slide">Slide</option>
+      </select>
+   
+     
+<h3>Section Directions</h3>
+<div style="float: left; width: 100%;">
+<div id="section1Wrapper">
+  <label>Section 1 Direction</label><br />
+  <select id="dir1">
+    <option value="left">Right → Left</option>
+    <option value="right">Left → Right</option>
+    <option value="top">Bottom → Top</option>
+    <option value="bottom">Top → Bottom</option>
+  </select>
+</div>
+
+<div id="section2Wrapper">
+  <label>Section 2 Direction</label><br />
+  <select id="dir2">
+    <option value="left">Right → Left</option>
+    <option value="right">Left → Right</option>
+    <option value="top">Bottom → Top</option>
+    <option value="bottom">Top → Bottom</option>
+  </select>
+</div>
+
+<div id="section3Wrapper">
+  <label>Section 3 Direction</label><br />
+  <select id="dir3">
+    <option value="left">Right → Left</option>
+    <option value="right">Left → Right</option>
+    <option value="top">Bottom → Top</option>
+    <option value="bottom">Top → Bottom</option>
+  </select>
+</div>
+
+</div>
+
+      <label>Ticker Text</label>
+      <input id="tickerText" type="text" />
+
+      <label>Ticker Text Color</label>
+      <input type="color" id="tickerColor" />
+
+      <label>Ticker Background Color</label>
+      <input type="color" id="tickerBgColor" />
+
+      <label>Ticker Font Size</label>
+      <input type="range" id="tickerFontSize" min="12" max="60" />
+
+      <label>Ticker Position</label>
+      <select id="tickerPosition">
+        <option value="bottom">Bottom</option>
+        <option value="top">Top</option>
+      </select>
+
+      <label>Ticker Speed</label>
+      <input type="range" id="tickerSpeed" min="0" max="12" value="6" />
+
+    </div>
+
+    <button class="save-btn" onclick="saveConfig()">Save Settings</button>
+  </div>
+
+ 
+
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>

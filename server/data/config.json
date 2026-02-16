@@ -1,0 +1,26 @@
+{
+  "orientation": "vertical",
+  "layout": "grid2",
+  "slideDuration": 5,
+  "animation": "slide",
+  "bgColor": "#000000",
+  "sections": [
+    {
+      "slideDirection": "left"
+    },
+    {
+      "slideDirection": "top"
+    },
+    {
+      "slideDirection": "right"
+    }
+  ],
+  "ticker": {
+    "text": "welcome to nextview",
+    "color": "#ffffff",
+    "bgColor": "#0fffff",
+    "speed": 8,
+    "fontSize": 44,
+    "position": "top"
+  }
+}

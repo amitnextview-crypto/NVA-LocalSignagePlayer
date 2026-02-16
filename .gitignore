@@ -73,3 +73,20 @@ yarn-error.log
 !.yarn/releases
 !.yarn/sdks
 !.yarn/versions
+
+
+# APK / AAB
+*.apk
+*.aab
+
+# Env files (CMS URL etc)
+.env
+.env.*
+
+# Logs
+*.log
+logs/
+
+# RN cache
+.expo/
+.expo-shared/
