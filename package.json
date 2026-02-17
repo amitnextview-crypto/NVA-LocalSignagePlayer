@@ -10,6 +10,7 @@
     "test": "jest"
   },
   "dependencies": {
+    "@react-native-async-storage/async-storage": "^2.2.0",
     "@react-native/new-app-screen": "0.83.1",
     "react": "19.2.0",
     "react-native": "0.83.1",
@@ -33,7 +34,7 @@
     "@react-native/babel-preset": "0.83.1",
     "@react-native/eslint-config": "0.83.1",
     "@react-native/metro-config": "0.83.1",
-    "@react-native/typescript-config": "0.83.1",
+    "@react-native/typescript-config": "^0.83.1",
     "@types/jest": "^29.5.13",
     "@types/react": "^19.2.0",
     "@types/react-native-immersive": "^1.0.0",

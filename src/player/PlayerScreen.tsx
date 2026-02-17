@@ -72,29 +72,12 @@ const GRID_GAP = 1; // pixels between sections
 
   const { width, height } = Dimensions.get("window");
 
-const isVertical = config.orientation === "vertical";
-
-// swap dimensions when vertical
-const rotatedWidth = isVertical ? height : width;
-const rotatedHeight = isVertical ? width : height;
 
 
 return (
    <View style={{ flex: 1, backgroundColor: config.bgColor }}>
 
-    <View
-      style={{
-        position: "absolute",
-
-        width: rotatedWidth,
-        height: rotatedHeight,
-
-        top: isVertical ? (height - rotatedHeight) / 2 : 0,
-        left: isVertical ? (width - rotatedWidth) / 2 : 0,
-
-        transform: isVertical ? [{ rotate: "90deg" }] : [],
-      }}
-    >
+   
 
       {/* 🔥 MEDIA AREA (space reserved for ticker) */}
        <View
@@ -154,7 +137,7 @@ return (
       {/* 🔥 TICKER */}
       {config.ticker?.text && <Ticker ticker={config.ticker} />}
 
-    </View>
+    
         </View>
 
   );

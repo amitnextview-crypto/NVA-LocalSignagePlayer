@@ -18,7 +18,7 @@
   "ticker": {
     "text": "welcome to nextview",
     "color": "#ffffff",
-    "bgColor": "#0fffff",
+    "bgColor": "#094e4e",
     "speed": 8,
     "fontSize": 44,
     "position": "top"

@@ -4,8 +4,7 @@ import { TouchableOpacity, Text } from "react-native";
 export default function AdminButton({ onOpen, onClose }: any) {
   return (
     <TouchableOpacity
-      onLongPress={onOpen}
-      onPress={onClose}
+      onPress={onOpen}
       style={{
         position: "absolute",
         top: 20,
