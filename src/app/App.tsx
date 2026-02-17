@@ -9,8 +9,6 @@ import AdminPanel from "../admin/AdminPanel";
 import { findCMS } from "../services/serverService";
 import { loadConfig } from "../services/configService";
 
-
-
 export default function App() {
   const [showAdmin, setShowAdmin] = useState(false);
   const [ready, setReady] = useState(false);
@@ -19,11 +17,20 @@ export default function App() {
   useEffect(() => {
     async function init() {
       try {
+        // try connect CMS (max 10 sec)
         await findCMS();
-        await loadConfig(setConfig);
+
+        // try load config (may fail if CMS offline)
+        try {
+          await loadConfig(setConfig);
+        } catch {
+          console.log("Starting without CMS");
+        }
+
         setReady(true);
       } catch {
-        console.log("CMS not found");
+        console.log("CMS not found — starting offline");
+        setReady(true);
       }
     }
 
@@ -31,28 +38,33 @@ export default function App() {
     (Immersive as any).on();
   }, []);
 
- if (!ready || !config) {
-  return (
-    <View
-      style={{
-        flex: 1,
-        backgroundColor: "#000",
-        justifyContent: "center",
-        alignItems: "center"
-      }}
-    >
-      <Text style={{ color: "white", fontSize: 22 }}>
-        Connecting to CMS...
-      </Text>
-    </View>
-  );
-}
+  // show loading while connecting
+  if (!ready) {
+    return (
+      <View
+        style={{
+          flex: 1,
+          backgroundColor: "#000",
+          justifyContent: "center",
+          alignItems: "center",
+        }}
+      >
+        <Text style={{ color: "white", fontSize: 22 }}>
+          Connecting to CMS...
+        </Text>
+      </View>
+    );
+  }
 
+  // fallback config if CMS not available
+  const safeConfig = config || {
+    orientation: "horizontal",
+    bgColor: "#000",
+  };
 
   const { width, height } = Dimensions.get("window");
 
-  const isVertical = config.orientation === "vertical";
-
+  const isVertical = safeConfig.orientation === "vertical";
   const rotatedWidth = isVertical ? height : width;
   const rotatedHeight = isVertical ? width : height;
 
