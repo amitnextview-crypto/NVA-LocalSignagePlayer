@@ -2,67 +2,69 @@ import React, { useEffect, useState } from 'react';
 import { View, Text } from 'react-native';
 import SlideRenderer from './SlideRenderer';
 import Ticker from './Ticker';
-import { loadConfig } from '../services/configService';
+
 import { syncMedia } from '../services/mediaService';
 import { io, Socket } from 'socket.io-client';
 import { Dimensions } from 'react-native';
-import { getServer } from "../services/serverService";
+import { findCMS } from "../services/serverService";
+  import { Platform } from "react-native";
+  import { NativeModules } from "react-native";
 
 let socket: Socket | null = null;
 
-export default function PlayerScreen() {
+export default function PlayerScreen({ config }: any) {
   const [refreshKey, setRefreshKey] = useState(0);
 // 🔥 Define a gap size
 const GRID_GAP = 1; // pixels between sections
 
- const [config, setConfig] = useState<any>(null);
+ 
   const [server, setServer] = useState("");
 
-  useEffect(():any => {
+useEffect(():any => {
   async function init() {
-  try {
-    const url = getServer();
+    try {
+      const url = await findCMS(); // ⭐ FIXED
+      if (!url) {
+        console.log("CMS not found");
+        return;
+      }
 
-    if (!url) {
-      console.log("Server not ready");
-      return;
+      setServer(url);
+
+
+const { DeviceIdModule } = NativeModules;
+const DEVICE_ID = await DeviceIdModule.getDeviceId();
+
+socket = io(url, {
+  transports: ["websocket"],
+});
+
+socket.on("connect", async () => {
+  console.log("✅ Connected:", DEVICE_ID);
+  if (socket) {
+    socket.emit("register-device", DEVICE_ID);
+     // 🔥 LOAD CONFIG AFTER REGISTER
+  
+  await syncMedia();
+  }
+});
+
+      socket.on("media-updated", async () => {
+        await syncMedia();
+        
+        setRefreshKey(prev => prev + 1);
+      });
+
+    } catch (e) {
+      console.log("Init error", e);
     }
-
-    setServer(url);
-
-    // ⭐ LOAD CONFIG FIRST
-    await loadConfig(setConfig);
-    await syncMedia();
-
-    socket = io(url);
-
-    socket.on("connect", () => {
-      console.log("✅ Connected to CMS");
-    });
-
-    socket.on("media-updated", async () => {
-      await syncMedia();
-      await loadConfig(setConfig);
-      setRefreshKey(prev => prev + 1);
-    });
-
-  } catch (e) {
-    console.log("Init error", e);
   }
-}
 
-    init();
+  init();
+  return () => socket?.disconnect();
+}, []);
 
-    return () => socket?.disconnect();
-  }, []);
-
-  if (!config) {
-    return (
-      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
-        <Text>Loading...</Text>
-      </View>
-    );
-  }
+  
 
   // 🔥 Calculate ticker height
   const tickerHeight = config?.ticker?.text
@@ -75,7 +77,7 @@ const GRID_GAP = 1; // pixels between sections
 
 
 return (
-   <View style={{ flex: 1, backgroundColor: config.bgColor }}>
+   <View  key={refreshKey} style={{ flex: 1, backgroundColor: config.bgColor }}>
 
    
 
@@ -137,9 +139,8 @@ return (
       {/* 🔥 TICKER */}
       {config.ticker?.text && <Ticker ticker={config.ticker} />}
 
-    
+   
         </View>
 
   );
 }
-

@@ -1,39 +1,41 @@
 import React, { useState, useEffect, useRef } from "react";
-import { View, TouchableOpacity, Text, StyleSheet, Animated } from "react-native";
+import { View, TouchableOpacity, Text, StyleSheet, Animated, TextInput, Alert } from "react-native";
 import { WebView } from "react-native-webview";
-import { findCMS, getServer } from "../services/serverService";
+import { findCMS, getServer, setServer } from "../services/serverService";
 
 export default function AdminPanel({ visible, onClose }: any) {
   const slide = useRef(new Animated.Value(400)).current;
 
-  const [server, setServer] = useState("");
-useEffect(() => {
-  async function init() {
-    try {
-      await findCMS();
-      const url = getServer();
-if (url) setServer(url);
-    } catch {}
-  }
+  const [server, updateServer] = useState("");
+  const [manualInput, setManualInput] = useState("");
 
-  init();
-}, []);
-
+  useEffect(() => {
+    async function init() {
+      const url = await findCMS();
+      if (url) updateServer(url);
+    }
+    init();
+  }, []);
 
   useEffect(() => {
     Animated.timing(slide, {
       toValue: visible ? 0 : 400,
       duration: 300,
-      useNativeDriver: true
+      useNativeDriver: true,
     }).start();
   }, [visible]);
+
+  const saveManualServer = async () => {
+    if (!manualInput.startsWith("http")) return Alert.alert("Enter full URL, e.g., http://192.168.1.5:8080");
+    await setServer(manualInput);
+    updateServer(manualInput);
+    Alert.alert("Saved CMS IP", manualInput);
+  };
 
   if (!visible) return null;
 
   return (
-    <Animated.View
-      style={[styles.overlay, { transform: [{ translateX: slide }] }]}
-    >
+    <Animated.View style={[styles.overlay, { transform: [{ translateX: slide }] }]}>
       <View style={styles.header}>
         <Text style={styles.title}>Admin Panel</Text>
         <TouchableOpacity onPress={onClose}>
@@ -41,7 +43,42 @@ if (url) setServer(url);
         </TouchableOpacity>
       </View>
 
-      <WebView source={{ uri: server }}  style={{ flex: 1 }} />
+      <View style={{ flex: 1, padding: 10 }}>
+        {/* Manual CMS input */}
+        <Text style={{ color: "#fff", marginBottom: 6 }}>CMS URL (manual):</Text>
+        <TextInput
+          placeholder="http://PC_IP:8080"
+          placeholderTextColor="#888"
+          value={manualInput}
+          onChangeText={setManualInput}
+          style={{
+            backgroundColor: "#222",
+            color: "#fff",
+            padding: 10,
+            borderRadius: 6,
+            marginBottom: 10,
+          }}
+        />
+        <TouchableOpacity
+          onPress={saveManualServer}
+          style={{ backgroundColor: "#4da3ff", padding: 10, borderRadius: 6, marginBottom: 20 }}
+        >
+          <Text style={{ color: "#fff", textAlign: "center" }}>Save CMS URL</Text>
+        </TouchableOpacity>
+
+        {/* WebView for config */}
+        {server ? (
+          <WebView
+            source={{ uri: server }}
+            style={{ flex: 1 }}
+            onMessage={(event) => {
+              if (event.nativeEvent.data === "CONFIG_SAVED") onClose();
+            }}
+          />
+        ) : (
+          <Text style={{ color: "#fff" }}>CMS not detected. Enter URL above.</Text>
+        )}
+      </View>
     </Animated.View>
   );
 }
@@ -53,7 +90,7 @@ const styles = StyleSheet.create({
     top: 0,
     bottom: 0,
     width: "90%",
-    backgroundColor: "#111"
+    backgroundColor: "#111",
   },
   header: {
     height: 60,
@@ -61,8 +98,8 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    paddingHorizontal: 20
+    paddingHorizontal: 20,
   },
   title: { color: "#fff", fontSize: 18, fontWeight: "bold" },
-  close: { color: "#fff", fontSize: 24 }
+  close: { color: "#fff", fontSize: 24 },
 });

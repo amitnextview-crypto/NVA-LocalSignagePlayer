@@ -28,8 +28,30 @@ const io = new Server(server, {
 
 global.io = io;
 
-io.on("connection", socket => {
-  console.log("TV connected");
+/* ⭐ STORE CONNECTED DEVICES */
+const connectedDevices = {};
+global.connectedDevices = connectedDevices;
+io.on("connection", (socket) => {
+
+  socket.on("register-device", (deviceId) => {
+    connectedDevices[deviceId] = socket.id;
+    console.log("Device connected:", deviceId);
+  });
+
+  socket.on("disconnect", () => {
+    for (let id in connectedDevices) {
+      if (connectedDevices[id] === socket.id) {
+        delete connectedDevices[id];
+        console.log("Device disconnected:", id);
+      }
+    }
+  });
+
+});
+
+/* ⭐ API TO GET CONNECTED DEVICES */
+app.get("/devices", (req, res) => {
+  res.json(Object.keys(connectedDevices));
 });
 
 /* START SERVER */

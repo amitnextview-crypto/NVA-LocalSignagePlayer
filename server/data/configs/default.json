@@ -1,0 +1,29 @@
+{
+  "orientation": "vertical",
+  "layout": "fullscreen",
+  "slideDuration": 2,
+  "animation": "slide",
+  "bgColor": "#000000",
+  "sections": [
+    {
+      "slideDirection": "top",
+      "slideDuration": 5
+    },
+    {
+      "slideDirection": "right",
+      "slideDuration": 5
+    },
+    {
+      "slideDirection": "bottom",
+      "slideDuration": 5
+    }
+  ],
+  "ticker": {
+    "text": "welcome to nextview 444",
+    "color": "#fcfcfc",
+    "bgColor": "#00ffff",
+    "speed": 12,
+    "fontSize": 17,
+    "position": "top"
+  }
+}

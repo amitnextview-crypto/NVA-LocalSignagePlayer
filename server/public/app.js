@@ -1,24 +1,64 @@
+let selectedDevice = "all";
+
+async function loadDevices() {
+  const res = await fetch('/devices');
+  const devices = await res.json();
+
+  const select = document.getElementById('deviceSelect');
+
+  const currentSelected = select.value;
+
+  select.innerHTML = "";
+
+  const allOption = document.createElement("option");
+  allOption.value = "all";
+  allOption.textContent = "All Devices";
+  select.appendChild(allOption);
+
+  devices.forEach(d => {
+    const opt = document.createElement("option");
+    opt.value = d;
+    opt.textContent = d;
+    select.appendChild(opt);
+  });
+
+  select.value =
+    devices.includes(currentSelected)
+      ? currentSelected
+      : "all";
+}
+
+// loadDevices();
+// setInterval(loadDevices, 100000);
+
+
 
 async function uploadMedia(section) {
-  const fileInput = document.getElementById(`media${section}`);
-  const files = fileInput.files;
 
-  if (!files.length) return alert("Select files");
+  const input = document.getElementById(`media${section}`);
+  const files = input.files;
 
-  const formData = new FormData();
-
-  for (let i = 0; i < files.length; i++) {
-    formData.append("files", files[i]);
+  if (!files.length) {
+    alert("Select file first");
+    return;
   }
 
-  await fetch(`/upload/section${section}`, {
+  const deviceId = document.getElementById("deviceSelect").value;
+
+  const formData = new FormData();
+  for (let file of files) {
+    formData.append("files", file);
+  }
+
+  console.log("Uploading to:", `/upload/${deviceId}/section/${section}`);
+
+  await fetch(`/upload/${deviceId}/section/${section}`, {
     method: "POST",
     body: formData
   });
 
-  alert(`Section ${section} uploaded`);
+  alert("Upload Success");
 }
-
 
 function updateSectionVisibility() {
   const layout = document.getElementById('layout').value;
@@ -48,21 +88,15 @@ function updateSectionVisibility() {
 
 async function loadConfig() {
 
-  const res = await fetch('/config');
+  const targetDevice = document.getElementById("deviceSelect")?.value || "all";
+
+  const res = await fetch(`/config?deviceId=${targetDevice}`);
   const config = await res.json();
 
   renderUploadSections();
 
-document.getElementById("layout")
-  .addEventListener("change", renderUploadSections);
-
-
   document.getElementById('orientation').value =
   config.orientation || 'horizontal';
-
-
-  document.getElementById('layout')
-  .addEventListener('change', updateSectionVisibility);
 
   document.getElementById('dir1').value =
   config.sections?.[0]?.slideDirection || 'left';
@@ -83,9 +117,18 @@ document.getElementById('tickerPosition').value = config.ticker.position || 'bot
 document.getElementById('tickerColor').value = config.ticker.color || '#ffffff';
 document.getElementById('tickerBgColor').value = config.ticker.bgColor || '#000000';
   document.getElementById('tickerSpeed').value = config.ticker.speed;
+
+  document.getElementById('duration1').value =
+  config.sections?.[0]?.slideDuration || 5;
+
+document.getElementById('duration2').value =
+  config.sections?.[1]?.slideDuration || 5;
+
+document.getElementById('duration3').value =
+  config.sections?.[2]?.slideDuration || 5;
 }
 
-loadConfig();
+// loadConfig();
 
 
 async function saveConfig() {
@@ -97,11 +140,19 @@ async function saveConfig() {
   bgColor: "#000000",
 
   sections: [
-    { slideDirection: document.getElementById('dir1').value },
-    { slideDirection: document.getElementById('dir2').value },
-    { slideDirection: document.getElementById('dir3').value }
-  ],
-
+  {
+    slideDirection: document.getElementById('dir1').value,
+    slideDuration: Number(document.getElementById('duration1').value)
+  },
+  {
+    slideDirection: document.getElementById('dir2').value,
+    slideDuration: Number(document.getElementById('duration2').value)
+  },
+  {
+    slideDirection: document.getElementById('dir3').value,
+    slideDuration: Number(document.getElementById('duration3').value)
+  }
+],
   ticker: {
     text: document.getElementById('tickerText').value,
     color: document.getElementById('tickerColor').value,
@@ -112,13 +163,31 @@ async function saveConfig() {
   }
 };
 
-  await fetch('/config', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(config)
-  });
+//   await fetch('/config', {
+//     method: 'POST',
+//     headers: { 'Content-Type': 'application/json' },
+//     body: JSON.stringify(config)
+//   });
 
-  alert('Saved');
+//  alert('Saved');
+
+const targetDevice = document.getElementById('deviceSelect').value;
+
+await fetch('/config', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    targetDevice,
+    config
+  })
+});
+alert("Saved Successfully");
+
+// send message to React Native WebView (TV app)
+if (window.ReactNativeWebView) {
+  window.ReactNativeWebView.postMessage("CONFIG_SAVED");
+}
+
 }
 
 function renderUploadSections() {
@@ -141,3 +210,21 @@ function renderUploadSections() {
     `;
   }
 }
+
+
+
+document.addEventListener("DOMContentLoaded", () => {
+
+  loadDevices();
+  loadConfig();
+
+  document.getElementById("layout")
+    .addEventListener("change", () => {
+      renderUploadSections();
+      updateSectionVisibility();
+    });
+
+  document
+    .getElementById("deviceSelect")
+    .addEventListener("change", loadConfig);
+});

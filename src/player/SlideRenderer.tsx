@@ -1,55 +1,60 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { Animated, Image, StyleSheet, View } from 'react-native';
-import Video from 'react-native-video';
-import { getMediaFiles } from '../services/mediaService';
-import { findCMS, getServer } from "../services/serverService";
-
-
+import React, { useEffect, useRef, useState } from "react";
+import { Animated, Image, StyleSheet, View, Text } from "react-native";
+import Video from "react-native-video";
+import { getMediaFiles } from "../services/mediaService";
+import { getServer } from "../services/serverService";
+import RNFS from "react-native-fs";
 
 export default function SlideRenderer({ config, sectionIndex }: any) {
   const [files, setFiles] = useState<any[]>([]);
   const [index, setIndex] = useState(0);
+  const [uri, setUri] = useState("");
 
+  const server = getServer();
 
-  const opacity = useRef(new Animated.Value(1)).current;
   const translateX = useRef(new Animated.Value(0)).current;
+  const translateY = useRef(new Animated.Value(0)).current;
+  const scale = useRef(new Animated.Value(0.95)).current;
   const timerRef = useRef<any>(null);
 
-  const scale = useRef(new Animated.Value(0.95)).current;
+  // load media list
+  useEffect(() => {
+    if (!server) return;
 
-  const [server, setServer] = useState("");
+    const load = async () => {
+      const list = await getMediaFiles(sectionIndex);
+      setFiles(list || []);
+      setIndex(0);
+    };
 
-useEffect(() => {
-  async function init() {
-    try {
-      const url = getServer();
-      setServer(url);
-    } catch {}
-  }
-  init();
-}, []);
+    load();
+  }, [sectionIndex, server, config]);
 
+  // resolve file uri
+  useEffect(() => {
+    if (!files.length) return;
 
-useEffect(() => {
-  Animated.spring(scale, {
-    toValue: 1,
-    useNativeDriver: true
-  }).start();
-}, [index]);
+    const file = files[index];
 
+    async function resolvePath() {
+      const exists = await RNFS.exists(file.localPath);
 
-useEffect(() => {
-  if (!server) return;
+      if (exists) setUri("file://" + file.localPath);
+      else if (server) setUri(server + file.url);
+    }
 
-  const load = async () => {
-    const list = await getMediaFiles(sectionIndex);
-    setFiles(list || []);
-  };
+    resolvePath();
+  }, [files, index, server]);
 
-  load();
-}, [sectionIndex, server]);
+  // animation
+  useEffect(() => {
+    Animated.spring(scale, {
+      toValue: 1,
+      useNativeDriver: true,
+    }).start();
+  }, [index]);
 
-
+  // slide timer
   useEffect(() => {
     if (!files.length) return;
 
@@ -59,93 +64,57 @@ useEffect(() => {
     const isVideo = /\.(mp4|mkv|webm)$/i.test(file.name);
 
     if (!isVideo) {
-      timerRef.current = setTimeout(() => {
-        goNext();
-      }, (config?.slideDuration || 5) * 1000);
+      timerRef.current = setTimeout(goNext, (
+  config?.sections?.[sectionIndex]?.slideDuration ||
+  config?.slideDuration ||
+  5
+) * 1000);
     }
 
     return () => clearTimeout(timerRef.current);
   }, [index, files, config]);
 
   const goNext = () => {
-  if (!files.length) return;
+    if (!files.length) return;
 
-  const direction =
-  config?.sections?.[sectionIndex]?.slideDirection || 'left';
+    const direction =
+      config?.sections?.[sectionIndex]?.slideDirection || "left";
 
+    const distance = 300;
 
-  const distanceX = 300;
-  const distanceY = 300;
+    translateX.setValue(0);
+    translateY.setValue(0);
 
-  // Reset values
-  translateX.setValue(0);
-  translateY.setValue(0);
+    if (direction === "left") translateX.setValue(distance);
+    if (direction === "right") translateX.setValue(-distance);
+    if (direction === "top") translateY.setValue(distance);
+    if (direction === "bottom") translateY.setValue(-distance);
 
-  if (direction === 'left') {
-    translateX.setValue(distanceX);
-    Animated.timing(translateX, {
-      toValue: 0,
-      duration: 400,
-      useNativeDriver: true
-    }).start();
-  }
+    Animated.timing(
+      direction === "left" || direction === "right"
+        ? translateX
+        : translateY,
+      { toValue: 0, duration: 400, useNativeDriver: true }
+    ).start();
 
-  if (direction === 'right') {
-    translateX.setValue(-distanceX);
-    Animated.timing(translateX, {
-      toValue: 0,
-      duration: 400,
-      useNativeDriver: true
-    }).start();
-  }
+    setIndex((prev) => (files.length === 1 ? prev : (prev + 1) % files.length));
+  };
 
-  if (direction === 'top') {
-    translateY.setValue(distanceY);
-    Animated.timing(translateY, {
-      toValue: 0,
-      duration: 400,
-      useNativeDriver: true
-    }).start();
-  }
+  if (!files.length)
+    return (
+      <View style={styles.center}>
+        <Text style={{ color: "#fff" }}>No Media Found</Text>
+      </View>
+    );
 
-  if (direction === 'bottom') {
-    translateY.setValue(-distanceY);
-    Animated.timing(translateY, {
-      toValue: 0,
-      duration: 400,
-      useNativeDriver: true
-    }).start();
-  }
-
-  setIndex(prev =>
-    files.length === 1 ? prev : (prev + 1) % files.length
-  );
-};
-
-const translateY = useRef(new Animated.Value(0)).current;
-
-  if (!files.length) {
-    return <View style={styles.container} />;
-  }
+  if (!uri) return <View />;
 
   const file = files[index];
-  const uri = server + file.url;
-
   const isVideo = /\.(mp4|mkv|webm)$/i.test(file.name);
 
   return (
     <Animated.View
-      style={[
-        styles.container,
-        {
- transform: [
-  { translateX },
-  { translateY },
-  { scale }
-]
-}
-
-      ]}
+      style={[styles.container, { transform: [{ translateX }, { translateY }, { scale }] }]}
     >
       {isVideo ? (
         <Video
@@ -158,25 +127,16 @@ const translateY = useRef(new Animated.Value(0)).current;
           onEnd={() => files.length > 1 && goNext()}
         />
       ) : (
-        <Image
-          source={{ uri }}
-          style={styles.media}
-          resizeMode="stretch"
-        />
+        <Image source={{ uri }} style={styles.media} resizeMode="stretch" />
       )}
     </Animated.View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#000',
-  },
-  media: {
-    width: '100%',
-    height: '100%',
-  },
+  container: { flex: 1, backgroundColor: "#000" },
+  media: { width: "100%", height: "100%" },
+  center: { flex: 1, justifyContent: "center", alignItems: "center" },
 });
 
 

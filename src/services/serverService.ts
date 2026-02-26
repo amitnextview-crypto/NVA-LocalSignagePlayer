@@ -1,17 +1,14 @@
+
 import { NetworkInfo } from "react-native-network-info";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
-let SERVER: string = "";
+let SERVER = "";
 const SERVER_KEY = "CMS_SERVER";
 
-const FETCH_TIMEOUT = 800; // timeout per request
-const MAX_SCAN_TIME = 10000; // max 10 sec total
+const FETCH_TIMEOUT = 800;
 
 // fetch with timeout
-function fetchWithTimeout(
-  url: string,
-  timeout: number = FETCH_TIMEOUT
-): Promise<Response> {
+function fetchWithTimeout(url: string, timeout = FETCH_TIMEOUT): Promise<Response> {
   return Promise.race([
     fetch(url),
     new Promise<Response>((_, reject) =>
@@ -20,16 +17,15 @@ function fetchWithTimeout(
   ]);
 }
 
+// Discover CMS: try cached first, then fallback, then manual input
 export async function findCMS(): Promise<string> {
   console.log("Finding CMS...");
 
-  // 1️⃣ try cached server first (fast)
+  // try cached CMS
   const saved = await AsyncStorage.getItem(SERVER_KEY);
-
   if (saved) {
     try {
       const res = await fetchWithTimeout(saved + "/config");
-
       if (res.ok) {
         SERVER = saved;
         console.log("Using cached CMS:", saved);
@@ -38,53 +34,29 @@ export async function findCMS(): Promise<string> {
     } catch {}
   }
 
-  // 2️⃣ get device IP
-  const ip = await NetworkInfo.getIPAddress();
-  if (!ip) throw new Error("No IP found");
+  // try fallback IP (your PC LAN IP)
+  const baseUrl = "http://172.19.88.107:8080"; // replace with your static PC IP
+  try {
+    const res = await fetchWithTimeout(baseUrl + "/config");
+    if (res.ok) {
+      SERVER = baseUrl;
+      await AsyncStorage.setItem(SERVER_KEY, baseUrl);
+      console.log("CMS found at fallback IP:", baseUrl);
+      return baseUrl;
+    }
+  } catch {}
 
-  const subnet = ip.split(".").slice(0, 3).join(".");
-  console.log("Fast scanning network...");
-
-  const requests: Promise<string | null>[] = [];
-
-  // 3️⃣ scan whole subnet in parallel
-  for (let i = 2; i < 255; i++) {
-    const url = `http://${subnet}.${i}:8080/config`;
-
-    requests.push(
-      fetchWithTimeout(url)
-        .then((res: Response) => {
-          if (res.ok) {
-            const serverUrl = `http://${subnet}.${i}:8080`;
-            SERVER = serverUrl;
-            AsyncStorage.setItem(SERVER_KEY, serverUrl);
-            return serverUrl;
-          }
-          return null;
-        })
-        .catch(() => null)
-    );
-  }
-
-  // 4️⃣ wait max 10 sec
-  const timeoutPromise = new Promise<string | null>((resolve) =>
-    setTimeout(() => resolve(null), MAX_SCAN_TIME)
-  );
-
-  const result = await Promise.race([
-    Promise.any(requests),
-    timeoutPromise,
-  ]);
-
-  if (result) {
-    console.log("CMS found:", result);
-    return result;
-  }
-
-  console.log("CMS not found in 10 sec — continuing offline");
+  console.log("CMS not found — please enter manually in AdminPanel");
   return "";
 }
 
+// Get current server
 export function getServer(): string {
   return SERVER;
+}
+
+// Save server manually (via AdminPanel input)
+export async function setServer(url: string) {
+  SERVER = url;
+  await AsyncStorage.setItem(SERVER_KEY, url);
 }

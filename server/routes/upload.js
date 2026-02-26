@@ -1,42 +1,58 @@
-
-const express = require('express');
-const multer = require('multer');
-const fs = require('fs');
-const path = require('path');
+const express = require("express");
+const multer = require("multer");
+const fs = require("fs");
+const path = require("path");
 
 const router = express.Router();
 
-router.post('/:section', (req, res) => {
-  try {
-    const section = req.params.section; // section1 / section2 / section3
+router.post("/:deviceId/section/:section", (req, res) => {
 
-    const UPLOAD_DIR = path.resolve(__dirname, '..', 'uploads', section);
+  const deviceId = req.params.deviceId;
+  const section = req.params.section;
 
-    if (!fs.existsSync(UPLOAD_DIR)) {
-      fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+  const uploadPath = path.join(
+    __dirname,
+    "../uploads",
+    deviceId,
+    `section${section}`
+  );
+
+  // Create folder if not exists
+  if (!fs.existsSync(uploadPath)) {
+    fs.mkdirSync(uploadPath, { recursive: true });
+  }
+
+  const storage = multer.diskStorage({
+    destination: uploadPath,
+    filename: (req, file, cb) => {
+      cb(null, Date.now() + "-" + file.originalname);
+    }
+  });
+
+  const upload = multer({ storage }).array("files");
+
+  upload(req, res, function (err) {
+
+    if (err) {
+      return res.status(500).json({ error: err });
     }
 
-    const upload = multer({
-      dest: UPLOAD_DIR,
-      limits: { fileSize: 1024 * 1024 * 1024 }
-    }).array('files', 50);
+    console.log("Uploaded to:", uploadPath);
 
-    upload(req, res, err => {
-      if (err) return res.status(500).json({ error: err.message });
+    // Notify devices
+    if (global.io) {
 
-      for (const file of req.files) {
-        const finalPath = path.join(UPLOAD_DIR, file.originalname);
-        fs.renameSync(file.path, finalPath);
+      if (deviceId === "all") {
+        global.io.emit("media-updated");
+      } else if (global.connectedDevices?.[deviceId]) {
+        const socketId = global.connectedDevices[deviceId];
+        global.io.to(socketId).emit("media-updated");
       }
+    }
 
-      if (global.io) global.io.emit('media-updated');
+    res.json({ success: true });
+  });
 
-      res.json({ success: true });
-    });
-
-  } catch (e) {
-    res.status(500).json({ error: 'Upload failed' });
-  }
 });
 
 module.exports = router;
