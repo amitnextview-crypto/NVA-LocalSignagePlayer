@@ -7,7 +7,7 @@ export default function AdminPanel({ visible, onClose }: any) {
   const slide = useRef(new Animated.Value(400)).current;
 
   const [server, updateServer] = useState("");
-  const [manualInput, setManualInput] = useState("");
+  const [manualInput, setManualInput] = useState("http://172.19.88.107:8080");
 
   useEffect(() => {
     async function init() {
@@ -103,3 +103,9 @@ const styles = StyleSheet.create({
   title: { color: "#fff", fontSize: 18, fontWeight: "bold" },
   close: { color: "#fff", fontSize: 24 },
 });
+
+
+
+
+
+

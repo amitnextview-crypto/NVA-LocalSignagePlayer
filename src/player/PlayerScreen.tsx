@@ -2,17 +2,12 @@ import React, { useEffect, useState } from 'react';
 import { View, Text } from 'react-native';
 import SlideRenderer from './SlideRenderer';
 import Ticker from './Ticker';
-
-import { syncMedia } from '../services/mediaService';
-import { io, Socket } from 'socket.io-client';
 import { Dimensions } from 'react-native';
-import { findCMS } from "../services/serverService";
-  import { Platform } from "react-native";
-  import { NativeModules } from "react-native";
 
-let socket: Socket | null = null;
 
-export default function PlayerScreen({ config }: any) {
+
+
+export default function PlayerScreen({ config, mediaVersion }: any) {
   const [refreshKey, setRefreshKey] = useState(0);
 // 🔥 Define a gap size
 const GRID_GAP = 1; // pixels between sections
@@ -20,53 +15,6 @@ const GRID_GAP = 1; // pixels between sections
  
   const [server, setServer] = useState("");
 
-useEffect(():any => {
-  async function init() {
-    try {
-      const url = await findCMS(); // ⭐ FIXED
-      if (!url) {
-        console.log("CMS not found");
-        return;
-      }
-
-      setServer(url);
-
-
-const { DeviceIdModule } = NativeModules;
-const DEVICE_ID = await DeviceIdModule.getDeviceId();
-
-socket = io(url, {
-  transports: ["websocket"],
-});
-
-socket.on("connect", async () => {
-  console.log("✅ Connected:", DEVICE_ID);
-  if (socket) {
-    socket.emit("register-device", DEVICE_ID);
-     // 🔥 LOAD CONFIG AFTER REGISTER
-  
-  await syncMedia();
-  }
-});
-
-      socket.on("media-updated", async () => {
-        await syncMedia();
-        
-        setRefreshKey(prev => prev + 1);
-      });
-
-    } catch (e) {
-      console.log("Init error", e);
-    }
-  }
-
-  init();
-  return () => socket?.disconnect();
-}, []);
-
-  
-
-  // 🔥 Calculate ticker height
   const tickerHeight = config?.ticker?.text
     ? (config.ticker.fontSize || 24) + 12
     : 0;
@@ -92,9 +40,10 @@ return (
       >
   {config.layout === 'fullscreen' && (
     <SlideRenderer
-  key={refreshKey}
+     key={mediaVersion + "-0"}
   config={config}
   sectionIndex={0}
+  mediaVersion={mediaVersion}
 />
   )}
 
@@ -103,17 +52,19 @@ return (
   <View style={{ flex: 1, flexDirection: 'row', gap: GRID_GAP }}>
     <View style={{ flex: 1, marginRight: GRID_GAP / 2 }}>
       <SlideRenderer
-        key={refreshKey + '-1'}
+       key={mediaVersion + "-1"}
         config={config}
         sectionIndex={0}
+        mediaVersion={mediaVersion}
       />
     </View>
 
     <View style={{ flex: 1, marginLeft: GRID_GAP / 2 }}>
       <SlideRenderer
-        key={refreshKey + '-2'}
+        key={mediaVersion + "-2"}
         config={config}
         sectionIndex={1}
+        mediaVersion={mediaVersion}
       />
     </View>
   </View>
@@ -122,13 +73,13 @@ return (
 {config.layout === 'grid3' && (
   <View style={{ flex: 1, flexDirection: 'row', gap: GRID_GAP }}>
     <View style={{ flex: 1, marginRight: GRID_GAP / 2 }}>
-      <SlideRenderer sectionIndex={0} config={config} />
+      <SlideRenderer   key={mediaVersion + "-3"} sectionIndex={0} config={config} mediaVersion={mediaVersion} />
     </View>
     <View style={{ flex: 1, marginHorizontal: GRID_GAP / 2 }}>
-      <SlideRenderer sectionIndex={1} config={config} />
+      <SlideRenderer key={mediaVersion + "-4"} sectionIndex={1} config={config} mediaVersion={mediaVersion} />
     </View>
     <View style={{ flex: 1, marginLeft: GRID_GAP / 2 }}>
-      <SlideRenderer sectionIndex={2} config={config} />
+      <SlideRenderer key={mediaVersion + "-5"} sectionIndex={2} config={config} mediaVersion={mediaVersion} />
     </View>
   </View>
 )}

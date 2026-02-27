@@ -4,7 +4,12 @@ const express = require("express");
 
 const router = express.Router();
 
-const CONFIG_DIR = path.join(__dirname, "../data/configs");
+// ⭐ Writable base path
+const basePath = process.pkg
+  ? path.dirname(process.execPath)
+  : path.join(__dirname, "..");
+
+const CONFIG_DIR = path.join(basePath, "data", "configs");
 
 // Ensure folder exists
 if (!fs.existsSync(CONFIG_DIR)) {
@@ -13,18 +18,15 @@ if (!fs.existsSync(CONFIG_DIR)) {
 
 /* ✅ GET CONFIG */
 router.get("/", (req, res) => {
-  const deviceId = req.query.deviceId;
 
+  const deviceId = req.query.deviceId;
   let filePath;
 
   if (deviceId) {
     const devicePath = path.join(CONFIG_DIR, `${deviceId}.json`);
-
-    if (fs.existsSync(devicePath)) {
-      filePath = devicePath;
-    } else {
-      filePath = path.join(CONFIG_DIR, "default.json");
-    }
+    filePath = fs.existsSync(devicePath)
+      ? devicePath
+      : path.join(CONFIG_DIR, "default.json");
   } else {
     filePath = path.join(CONFIG_DIR, "default.json");
   }
@@ -35,19 +37,37 @@ router.get("/", (req, res) => {
 
 /* ✅ SAVE CONFIG */
 router.post("/", (req, res) => {
+
   const { targetDevice, config } = req.body;
 
   if (targetDevice === "all") {
+
+    // 🔥 1. Update default config
     const defaultPath = path.join(CONFIG_DIR, "default.json");
     fs.writeFileSync(defaultPath, JSON.stringify(config, null, 2));
 
+    // 🔥 2. Update ALL device-specific config files
+    const files = fs.readdirSync(CONFIG_DIR);
+
+    files.forEach(file => {
+      if (file !== "default.json" && file.endsWith(".json")) {
+        const devicePath = path.join(CONFIG_DIR, file);
+        fs.writeFileSync(devicePath, JSON.stringify(config, null, 2));
+      }
+    });
+
+    // 🔥 3. Notify ALL connected devices
     if (global.io) {
       global.io.emit("media-updated");
     }
+
   } else {
+
+    // 🔥 Update only selected device
     const devicePath = path.join(CONFIG_DIR, `${targetDevice}.json`);
     fs.writeFileSync(devicePath, JSON.stringify(config, null, 2));
 
+    // 🔥 Notify only that device
     if (global.io && global.connectedDevices?.[targetDevice]) {
       const socketId = global.connectedDevices[targetDevice];
       global.io.to(socketId).emit("media-updated");

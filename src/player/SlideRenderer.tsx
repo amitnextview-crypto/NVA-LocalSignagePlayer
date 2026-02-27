@@ -5,7 +5,7 @@ import { getMediaFiles } from "../services/mediaService";
 import { getServer } from "../services/serverService";
 import RNFS from "react-native-fs";
 
-export default function SlideRenderer({ config, sectionIndex }: any) {
+export default function SlideRenderer({ config, sectionIndex, mediaVersion }: any) {
   const [files, setFiles] = useState<any[]>([]);
   const [index, setIndex] = useState(0);
   const [uri, setUri] = useState("");
@@ -28,7 +28,7 @@ export default function SlideRenderer({ config, sectionIndex }: any) {
     };
 
     load();
-  }, [sectionIndex, server, config]);
+  }, [sectionIndex, server, mediaVersion]);
 
   // resolve file uri
   useEffect(() => {
@@ -138,5 +138,7 @@ const styles = StyleSheet.create({
   media: { width: "100%", height: "100%" },
   center: { flex: 1, justifyContent: "center", alignItems: "center" },
 });
+
+
 
 

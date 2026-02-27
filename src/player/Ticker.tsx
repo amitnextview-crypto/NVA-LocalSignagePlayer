@@ -2,40 +2,37 @@ import React, { useEffect, useRef, useState } from "react";
 import { Animated, View, Dimensions, Text } from "react-native";
 
 export default function Ticker({ ticker }: any) {
-  const { width } = Dimensions.get("window"); // ✅ inside component
+  const { width } = Dimensions.get("window");
 
-  const translateX = useRef(new Animated.Value(0)).current;
+  const translateX = useRef(new Animated.Value(width)).current;
   const [textWidth, setTextWidth] = useState(0);
 
   useEffect(() => {
-    if (!ticker?.text || !textWidth) return;
+    if (!ticker?.text) return;
+
+    if (!textWidth) return; // wait until width calculated
 
     const speed = ticker.speed ?? 6;
 
-    // pixels per second
     const pixelsPerSecond = 40 + speed * 15;
-
-    // total distance to travel
     const distance = width + textWidth;
-
     const duration = (distance / pixelsPerSecond) * 1000;
 
-    // start from right edge
     translateX.setValue(width);
 
-    const animate = () => {
+    const animation = Animated.loop(
       Animated.timing(translateX, {
         toValue: -textWidth,
         duration: duration,
         useNativeDriver: true,
-      }).start(() => {
-        translateX.setValue(width);
-        animate();
-      });
-    };
+      })
+    );
 
-    animate();
-  }, [ticker?.text, ticker?.speed, textWidth, width]);
+    animation.start();
+
+    return () => animation.stop();
+
+  }, [ticker?.text, ticker?.speed, textWidth]);
 
   if (!ticker?.text) return null;
 
@@ -49,23 +46,22 @@ export default function Ticker({ ticker }: any) {
         backgroundColor: ticker.bgColor || "#000",
         overflow: "hidden",
         paddingVertical: 6,
+        justifyContent: "center"
       }}
     >
-      <Animated.View style={{ transform: [{ translateX }] }}>
-        <Text
-          numberOfLines={1}
-          onLayout={(e) => {
-            setTextWidth(e.nativeEvent.layout.width);
-          }}
-          style={{
-            color: ticker.color || "#fff",
-            fontSize: ticker.fontSize || 24,
-          }}
-        >
-          {ticker.text}
-        </Text>
-      </Animated.View>
+      <Animated.Text
+        numberOfLines={1}
+        onLayout={(e) => {
+          setTextWidth(e.nativeEvent.layout.width);
+        }}
+        style={{
+          transform: [{ translateX }],
+          color: ticker.color || "#fff",
+          fontSize: ticker.fontSize || 24,
+        }}
+      >
+        {ticker.text}
+      </Animated.Text>
     </View>
   );
 }
-

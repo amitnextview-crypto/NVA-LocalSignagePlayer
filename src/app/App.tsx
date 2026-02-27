@@ -6,18 +6,20 @@ import AdminButton from "../admin/AdminButton";
 import AdminPanel from "../admin/AdminPanel";
 import { findCMS } from "../services/serverService";
 import { loadConfig } from "../services/configService";
-import { io } from "socket.io-client";
-import { getServer } from "../services/serverService";
-import { useWindowDimensions } from "react-native";
-import Ticker from "../player/Ticker";
-let socket: any = null;
+import { io, Socket } from 'socket.io-client';
+import { syncMedia } from '../services/mediaService';
+import { NativeModules } from "react-native";
+
+
+let socket:any | Socket | null = null;
 
 export default function App() {
   const [showAdmin, setShowAdmin] = useState(false);
   const [ready, setReady] = useState(false);
   const [config, setConfig] = useState<any>(null);
+  const [mediaVersion, setMediaVersion] = useState(0);
 
-useEffect(() => {
+ useEffect(() => {
   async function init() {
     try {
       const url = await findCMS();
@@ -27,21 +29,39 @@ useEffect(() => {
         return;
       }
 
-      socket = io(url, { transports: ["websocket"] });
+      const { DeviceIdModule } = NativeModules;
+      const DEVICE_ID = await DeviceIdModule.getDeviceId();
+
+      socket = io(url, {
+        transports: ["websocket"],
+      });
 
       socket.on("connect", async () => {
-        console.log("Connected to CMS");
-        await loadConfig(setConfig);
-      });
+        console.log("Connected:", DEVICE_ID);
 
-      socket.on("media-updated", async () => {
-        console.log("Media updated");
-        await loadConfig(setConfig);
-      });
+        // 🔥 Register device
+        socket.emit("register-device", DEVICE_ID);
 
-      setReady(true);
+        // 🔥 Load config
+        await loadConfig(setConfig);
+
+        // 🔥 Sync media
+        await syncMedia();
+
+        setReady(true);
+      });
+socket.on("media-updated", async () => {
+  console.log("Media updated event received");
+
+  await syncMedia();
+  await loadConfig(setConfig);
+
+  // 🔥 FORCE MEDIA RELOAD
+  setMediaVersion(prev => prev + 1);
+});
+
     } catch (err) {
-      console.log("CMS error", err);
+      console.log("Init error", err);
       setReady(true);
     }
   }
@@ -49,7 +69,9 @@ useEffect(() => {
   init();
   (Immersive as any).on();
 
-  return () => socket?.disconnect();
+  return () => {
+    if (socket) socket.disconnect();
+  };
 }, []);
   // show loading while connecting
   if (!ready) {
@@ -111,7 +133,10 @@ return (
         transform: [{ rotate: rotation }],
       }}
     >
-      <PlayerScreen config={safeConfig} />
+     <PlayerScreen 
+  config={safeConfig} 
+  mediaVersion={mediaVersion}
+/>
       <AdminButton onOpen={() => setShowAdmin(true)} />
       <AdminPanel
         visible={showAdmin}
@@ -121,3 +146,8 @@ return (
   </View>
 );
 }
+
+
+
+
+

@@ -13,36 +13,50 @@ export async function syncMedia() {
 
     const DEVICE_ID = await DeviceIdModule.getDeviceId();
 
-const res = await fetch(
-  `${SERVER}/media-list?deviceId=${DEVICE_ID}`
-);
+    const res = await fetch(
+      `${SERVER}/media-list?deviceId=${DEVICE_ID}`
+    );
     const serverFiles = await res.json();
 
-    const exists = await RNFS.exists(MEDIA_DIR);
-    if (!exists) await RNFS.mkdir(MEDIA_DIR);
-
-    const localFiles = await RNFS.readDir(MEDIA_DIR);
-
-    // remove deleted files
-    for (const local of localFiles) {
-      const stillExists = serverFiles.find((s: any) => s.name === local.name);
-      if (!stillExists) await RNFS.unlink(local.path);
+    if (!(await RNFS.exists(MEDIA_DIR))) {
+      await RNFS.mkdir(MEDIA_DIR);
     }
 
-    // download new files
-    for (const file of serverFiles) {
-     const sectionDir = `${MEDIA_DIR}/section${file.section}`;
-const existsDir = await RNFS.exists(sectionDir);
-if (!existsDir) await RNFS.mkdir(sectionDir);
+    // 🔥 LOOP EACH SECTION
+    for (let i = 1; i <= 3; i++) {
+      const sectionDir = `${MEDIA_DIR}/section${i}`;
 
-const localPath = `${sectionDir}/${file.name}`;
-      const exists = await RNFS.exists(localPath);
+      if (!(await RNFS.exists(sectionDir))) {
+        await RNFS.mkdir(sectionDir);
+      }
 
-      if (!exists) {
-        await RNFS.downloadFile({
-          fromUrl: SERVER + file.url,
-          toFile: localPath,
-        }).promise;
+      const localFiles = await RNFS.readDir(sectionDir);
+
+      const serverSectionFiles = serverFiles.filter(
+        (f: any) => f.section === i
+      );
+
+      // 🔥 DELETE removed files
+      for (const local of localFiles) {
+        const stillExists = serverSectionFiles.find(
+          (s: any) => s.name === local.name
+        );
+
+        if (!stillExists) {
+          await RNFS.unlink(local.path);
+        }
+      }
+
+      // 🔥 DOWNLOAD new files
+      for (const file of serverSectionFiles) {
+        const localPath = `${sectionDir}/${file.name}`;
+
+        if (!(await RNFS.exists(localPath))) {
+          await RNFS.downloadFile({
+            fromUrl: SERVER + file.url,
+            toFile: localPath,
+          }).promise;
+        }
       }
     }
 
@@ -73,3 +87,6 @@ const filtered = list.filter(
    localPath: `${MEDIA_DIR}/section${file.section}/${file.name}`,
   }));
 }
+
+
+
