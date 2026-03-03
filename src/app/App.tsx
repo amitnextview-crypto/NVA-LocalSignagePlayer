@@ -35,6 +35,7 @@ export default function App() {
   );
   const spinValue = useRef(new Animated.Value(0)).current;
   const pulseValue = useRef(new Animated.Value(0)).current;
+  const deviceIdRef = useRef("unknown");
 
   useEffect(() => {
     const spinLoop = Animated.loop(
@@ -76,6 +77,7 @@ export default function App() {
     let isMounted = true;
     let disconnectTimer: ReturnType<typeof setTimeout> | null = null;
     let watchdogTimer: ReturnType<typeof setInterval> | null = null;
+    let healthTimer: ReturnType<typeof setInterval> | null = null;
     let lastWatchdogTick = Date.now();
     const setConnectTexts = (subtitle: string, status: string) => {
       if (!isMounted) return;
@@ -84,6 +86,13 @@ export default function App() {
     };
 
     const safeRestartApp = (reason: string) => {
+      if (socket?.connected) {
+        socket.emit("device-error", {
+          deviceId: deviceIdRef.current,
+          type: "restart",
+          message: `App restart triggered: ${reason}`,
+        });
+      }
       console.log("Restarting app:", reason);
       try {
         const rn = require("react-native");
@@ -134,6 +143,24 @@ export default function App() {
       watchdogTimer = null;
     };
 
+    const emitDeviceHealth = (appState: string, meta: any = null) => {
+      if (!socket?.connected) return;
+      socket.emit("device-health", {
+        deviceId: deviceIdRef.current,
+        appState,
+        meta,
+      });
+    };
+
+    const emitDeviceError = (type: string, message: string) => {
+      if (!socket?.connected) return;
+      socket.emit("device-error", {
+        deviceId: deviceIdRef.current,
+        type,
+        message,
+      });
+    };
+
     const onClearData = async () => {
       console.log("Clear data command received");
       const RNFS = require("react-native-fs");
@@ -150,10 +177,12 @@ export default function App() {
         }
 
         console.log("Data cleared");
+        emitDeviceHealth("clear-data");
         const { DevSettings } = require("react-native");
         DevSettings.reload();
       } catch (e) {
         console.log("Clear failed", e);
+        emitDeviceError("clear-data", `Clear failed: ${String((e as any)?.message || e)}`);
       }
     };
 
@@ -176,6 +205,7 @@ export default function App() {
 
         const { DeviceIdModule } = NativeModules;
         const deviceId = await DeviceIdModule.getDeviceId();
+        deviceIdRef.current = deviceId;
         setConnectTexts(
           `CMS found at ${url}. Opening secure socket`,
           "Connecting to server"
@@ -192,12 +222,20 @@ export default function App() {
           console.log("Connected:", deviceId);
           clearDisconnectRecovery();
           socket?.emit("register-device", deviceId);
+          emitDeviceHealth("connected", { phase: "socket-connected" });
           setConnectTexts("Connected. Downloading device configuration", "Syncing config");
 
           await loadConfig(setConfig);
+          emitDeviceHealth("syncing-config");
           setConnectTexts("Configuration received. Syncing media catalog", "Syncing media");
           await syncMedia();
+          emitDeviceHealth("syncing-media");
           setConnectTexts("Setup complete. Starting player", "Ready");
+
+          if (healthTimer) clearInterval(healthTimer);
+          healthTimer = setInterval(() => {
+            emitDeviceHealth("ready", { ready: true });
+          }, 15000);
 
           if (isMounted) setReady(true);
         });
@@ -206,6 +244,7 @@ export default function App() {
         socket.on("media-updated", async () => {
           await syncMedia();
           await loadConfig(setConfig);
+          emitDeviceHealth("media-updated");
           if (isMounted) {
             setMediaVersion((prev) => prev + 1);
           }
@@ -214,10 +253,23 @@ export default function App() {
         // Config-only update should apply settings without restarting media playback.
         socket.on("config-updated", async () => {
           await loadConfig(setConfig);
+          emitDeviceHealth("config-updated");
         });
 
         socket.on("clear-data", onClearData);
         socket.on("restart-app", () => safeRestartApp("manual restart command"));
+        socket.on("set-auto-reopen", (payload) => {
+          try {
+            const enabled = !!payload?.enabled;
+            const { DeviceIdModule: NativeDeviceModule } = NativeModules;
+            if (NativeDeviceModule?.setAutoReopenEnabled) {
+              NativeDeviceModule.setAutoReopenEnabled(enabled);
+              emitDeviceHealth("auto-reopen-updated", { enabled });
+            }
+          } catch (e) {
+            emitDeviceError("auto-reopen", `Failed to update auto reopen: ${String((e as any)?.message || e)}`);
+          }
+        });
         socket.on("disconnect", (reason) => {
           setConnectTexts(
             `Connection lost (${String(reason)}). Trying to recover`,
@@ -230,10 +282,18 @@ export default function App() {
             "Socket handshake failed. Retrying automatically",
             "Connect error"
           );
+          emitDeviceError("connect-error", err?.message || "unknown");
           startDisconnectRecovery(`connect_error:${err?.message || "unknown"}`);
         });
       } catch (err) {
         console.log("Init error", err);
+        if (socket?.connected) {
+          socket.emit("device-error", {
+            deviceId: deviceIdRef.current,
+            type: "init",
+            message: String((err as any)?.message || err),
+          });
+        }
         setConnectTexts("Startup failed unexpectedly", "Recovery mode");
         if (isMounted) setReady(false);
       }
@@ -247,12 +307,17 @@ export default function App() {
       isMounted = false;
       clearDisconnectRecovery();
       stopWatchdog();
+      if (healthTimer) {
+        clearInterval(healthTimer);
+        healthTimer = null;
+      }
       if (socket) {
         socket.off("connect");
         socket.off("media-updated");
         socket.off("config-updated");
         socket.off("clear-data", onClearData);
         socket.off("restart-app");
+        socket.off("set-auto-reopen");
         socket.off("disconnect");
         socket.off("connect_error");
         socket.disconnect();

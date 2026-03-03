@@ -398,10 +398,8 @@ export default function SlideRenderer({
             key={`${file.name}-${index}-${mediaRotation}`}
             source={{ uri }}
             style={styles.media}
-            // Force texture rendering so transform/rotation applies on Android TV devices.
-            viewType={ViewType.TEXTURE}
-            // Backward-compatible fallback for older react-native-video builds.
-            useTextureView
+            // Multiple simultaneous videos are generally more stable with SURFACE on Android TV.
+            viewType={ViewType.SURFACE}
             muted
             resizeMode="stretch"
             repeat={files.length === 1}

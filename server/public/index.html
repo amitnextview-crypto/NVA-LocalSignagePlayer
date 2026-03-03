@@ -18,6 +18,8 @@
         </div>
       </div>
       <div class="hero-actions">
+        <button class="btn primary" onclick="setAutoReopen(true)">Auto Reopen ON</button>
+        <button class="btn warning" onclick="setAutoReopen(false)">Auto Reopen OFF</button>
         <button class="btn danger" onclick="clearDeviceData()">Clear Device Data</button>
         <button class="btn warning" onclick="restartDeviceApp()">Restart Device App</button>
       </div>
@@ -37,6 +39,13 @@
           <h2>Upload Media</h2>
           <p class="section-help">Upload media by section. Existing section files will be replaced after successful upload.</p>
           <div id="uploadSections"></div>
+          <div class="sub-card alerts-card">
+            <h3>Device Alerts</h3>
+            <p class="section-help">Offline, closed app, and runtime errors will appear here.</p>
+            <div id="deviceAlertsList" class="alerts-list">
+              <div class="alerts-empty">Loading device status...</div>
+            </div>
+          </div>
         </section>
       </div>
 

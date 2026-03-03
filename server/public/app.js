@@ -25,6 +25,7 @@ let previewSectionState = {
   3: { index: 0, timer: null },
 };
 let previewPollTimer = null;
+let alertsPollTimer = null;
 let selectedGridRatio = "1:1:1";
 
 const RATIO_PRESETS = {
@@ -768,6 +769,85 @@ function updateSectionVisibility() {
   renderScreenPreview();
 }
 
+function formatStatusTime(value) {
+  if (!value) return "-";
+  const dt = new Date(value);
+  if (Number.isNaN(dt.getTime())) return "-";
+  return dt.toLocaleString();
+}
+
+function renderDeviceAlerts(statusList) {
+  const box = document.getElementById("deviceAlertsList");
+  if (!box) return;
+
+  const selectedDevice = document.getElementById("deviceSelect")?.value || "all";
+  const filtered = selectedDevice === "all"
+    ? statusList
+    : statusList.filter((s) => s.deviceId === selectedDevice);
+
+  if (!filtered.length) {
+    box.innerHTML = `<div class="alerts-empty">No device alerts yet.</div>`;
+    return;
+  }
+
+  box.innerHTML = filtered
+    .map((item) => {
+      const online = !!item.online;
+      const hasError = !!item.lastError;
+      const offline = !online;
+      const stateClass = online ? "online" : hasError ? "error" : "offline";
+      const stateText = online ? "Online" : hasError ? "Error" : "Offline";
+      const cardClass = online ? "" : hasError ? "error" : "offline";
+
+      const details = [
+        `Last Seen: ${formatStatusTime(item.lastSeen)}`,
+      ];
+      if (item.lastDisconnectAt) {
+        details.push(
+          `Disconnected: ${formatStatusTime(item.lastDisconnectAt)} (${item.lastDisconnectReason || "unknown"})`
+        );
+      }
+      if (item.lastErrorAt) {
+        details.push(`Error At: ${formatStatusTime(item.lastErrorAt)}`);
+      }
+      if (item.lastError) {
+        details.push(`Error: ${item.lastError}`);
+      }
+
+      return `
+        <div class="alert-item ${cardClass}">
+          <div class="alert-head">
+            <div class="alert-device">${item.deviceId}</div>
+            <div class="alert-state ${stateClass}">${stateText}</div>
+          </div>
+          <div class="alert-meta">${details.join("<br/>")}</div>
+        </div>
+      `;
+    })
+    .join("");
+}
+
+async function loadDeviceAlerts() {
+  try {
+    const res = await fetch(`/device-status?ts=${Date.now()}`);
+    const list = await res.json();
+    renderDeviceAlerts(Array.isArray(list) ? list : []);
+  } catch (_e) {
+    const box = document.getElementById("deviceAlertsList");
+    if (box) {
+      box.innerHTML = `<div class="alerts-empty">Unable to load device alerts.</div>`;
+    }
+  }
+}
+
+function startAlertsPolling() {
+  if (alertsPollTimer) {
+    clearInterval(alertsPollTimer);
+  }
+  loadDeviceAlerts();
+  alertsPollTimer = setInterval(loadDeviceAlerts, 5000);
+}
+
 function onSectionSourceChange(section) {
   updateSectionUploadMode(section);
   currentConfig = buildConfigFromForm();
@@ -1057,6 +1137,30 @@ async function restartDeviceApp() {
   }
 }
 
+async function setAutoReopen(enabled) {
+  const deviceId = document.getElementById("deviceSelect").value;
+  const label = enabled ? "enable" : "disable";
+  const confirmMsg =
+    deviceId === "all"
+      ? `Apply "${label} auto reopen" on ALL connected devices?`
+      : `Apply "${label} auto reopen" on device ${deviceId}?`;
+
+  if (!confirm(confirmMsg)) return;
+
+  const res = await fetch("/config/auto-reopen", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ targetDevice: deviceId, enabled: !!enabled }),
+  });
+
+  const data = await res.json();
+  if (data?.success) {
+    alert(`Auto reopen ${enabled ? "enabled" : "disabled"} command sent`);
+  } else {
+    alert("Command failed: device not connected");
+  }
+}
+
 document.addEventListener("DOMContentLoaded", () => {
   renderGrid3LayoutOptions();
   updateScheduleFallbackVisibility();
@@ -1064,6 +1168,7 @@ document.addEventListener("DOMContentLoaded", () => {
   loadDevices();
   loadConfig();
   startPreviewPolling();
+  startAlertsPolling();
 
   document.getElementById("layout").addEventListener("change", () => {
     updateGridRatioOptions();
@@ -1073,7 +1178,10 @@ document.addEventListener("DOMContentLoaded", () => {
     updateSectionVisibility();
   });
 
-  document.getElementById("deviceSelect").addEventListener("change", loadConfig);
+  document.getElementById("deviceSelect").addEventListener("change", () => {
+    loadConfig();
+    loadDeviceAlerts();
+  });
   document.getElementById("gridRatio").addEventListener("change", (e) => {
     selectedGridRatio = e.target.value;
     if (currentConfig) currentConfig.gridRatio = selectedGridRatio;

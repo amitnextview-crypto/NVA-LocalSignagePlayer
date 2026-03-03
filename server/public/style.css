@@ -138,6 +138,71 @@ h3 {
   background: rgba(13, 20, 29, 0.56);
 }
 
+.alerts-card {
+  margin-top: 12px;
+}
+
+.alerts-list {
+  display: grid;
+  gap: 8px;
+  max-height: 200px;
+  overflow: auto;
+  padding-right: 2px;
+}
+
+.alerts-empty {
+  border: 1px dashed rgba(129, 185, 225, 0.35);
+  border-radius: 10px;
+  padding: 10px;
+  color: #c3daee;
+  font-size: 12px;
+}
+
+.alert-item {
+  border-radius: 10px;
+  border: 1px solid rgba(146, 198, 233, 0.25);
+  background: rgba(9, 16, 24, 0.72);
+  padding: 9px 10px;
+}
+
+.alert-item.offline {
+  border-color: rgba(239, 95, 114, 0.6);
+}
+
+.alert-item.error {
+  border-color: rgba(247, 165, 63, 0.62);
+}
+
+.alert-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 4px;
+}
+
+.alert-device {
+  font-size: 12px;
+  font-weight: 800;
+  color: #e8f4ff;
+}
+
+.alert-state {
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.alert-state.online { color: #35e1c8; }
+.alert-state.offline { color: #ef5f72; }
+.alert-state.error { color: #f7a53f; }
+
+.alert-meta {
+  font-size: 11px;
+  color: #aac3d8;
+  line-height: 1.4;
+}
+
 .form-grid {
   display: grid;
   grid-template-columns: 160px 1fr;

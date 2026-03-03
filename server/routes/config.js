@@ -139,6 +139,27 @@ router.post("/restart-device", (req, res) => {
   return res.json({ success: false });
 });
 
+router.post("/auto-reopen", (req, res) => {
+  const { targetDevice, enabled } = req.body || {};
+  const flag = !!enabled;
+
+  if (targetDevice === "all") {
+    if (global.io) {
+      global.io.emit("set-auto-reopen", { enabled: flag });
+      return res.json({ success: true });
+    }
+    return res.json({ success: false });
+  }
+
+  if (global.io && global.connectedDevices?.[targetDevice]) {
+    const socketId = global.connectedDevices[targetDevice];
+    global.io.to(socketId).emit("set-auto-reopen", { enabled: flag });
+    return res.json({ success: true });
+  }
+
+  return res.json({ success: false });
+});
+
 router.post("/upload-fallback-image", (req, res) => {
   fallbackUpload.single("file")(req, res, (err) => {
     if (err) {
