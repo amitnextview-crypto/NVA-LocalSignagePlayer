@@ -6,13 +6,19 @@ const { DeviceIdModule } = NativeModules;
 
 export async function loadConfig(setConfig: Function) {
   try {
-    const SERVER = getServer();
-    if (!SERVER) return;
+    const server = getServer();
+    if (!server) return;
 
-    const DEVICE_ID = await DeviceIdModule.getDeviceId();
+    const deviceId = await DeviceIdModule.getDeviceId();
 
     const res = await fetch(
-      `${SERVER}/config?deviceId=${DEVICE_ID}`
+      `${server}/config?deviceId=${deviceId}&ts=${Date.now()}`,
+      {
+        headers: {
+          "Cache-Control": "no-cache",
+          Pragma: "no-cache",
+        },
+      }
     );
 
     const config = await res.json();

@@ -23,9 +23,28 @@ const basePath = process.pkg
 app.use("/media-list", mediaRoutes);
 app.use("/upload", uploadRoutes);
 app.use("/config", configRoutes);
-
-app.use("/media", express.static(path.join(basePath, "uploads")));
 app.use("/", express.static(path.join(basePath, "public")));
+app.use("/media", express.static(path.join(basePath, "uploads"), {
+  setHeaders: (res, filePath) => {
+
+    if (filePath.endsWith(".mp4")) {
+      res.setHeader("Content-Type", "video/mp4");
+      res.setHeader("Accept-Ranges", "bytes");
+      // Avoid long-lived device cache growth for large media.
+      res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+      res.setHeader("Pragma", "no-cache");
+      res.setHeader("Expires", "0");
+      res.setHeader("Surrogate-Control", "no-store");
+    }
+
+    if (filePath.match(/\.(jpg|jpeg|png|pdf|txt)$/i)) {
+      res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+      res.setHeader("Pragma", "no-cache");
+      res.setHeader("Expires", "0");
+      res.setHeader("Surrogate-Control", "no-store");
+    }
+  }
+}));
 
 /* ⭐ SOCKET SERVER */
 const server = http.createServer(app);

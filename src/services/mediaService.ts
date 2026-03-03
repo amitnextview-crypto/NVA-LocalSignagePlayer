@@ -1,64 +1,33 @@
 import RNFS from "react-native-fs";
-import { getServer } from "./serverService";
 import { NativeModules } from "react-native";
+import { getServer } from "./serverService";
 
 const { DeviceIdModule } = NativeModules;
 
 const MEDIA_DIR = `${RNFS.DocumentDirectoryPath}/media`;
 
+async function cleanupLegacyLocalMedia() {
+  try {
+    if (await RNFS.exists(MEDIA_DIR)) {
+      await RNFS.unlink(MEDIA_DIR);
+    }
+  } catch (e) {
+    console.log("Legacy media cleanup failed", e);
+  }
+}
+
 export async function syncMedia() {
   try {
-    const SERVER = getServer();
-    if (!SERVER) return false;
+    const server = getServer();
+    if (!server) return false;
 
-    const DEVICE_ID = await DeviceIdModule.getDeviceId();
+    // Keep app in stream mode: no local media persistence.
+    await cleanupLegacyLocalMedia();
 
-    const res = await fetch(
-      `${SERVER}/media-list?deviceId=${DEVICE_ID}`
+    const deviceId = await DeviceIdModule.getDeviceId();
+    await fetch(
+      `${server}/media-list?deviceId=${deviceId}&ts=${Date.now()}`
     );
-    const serverFiles = await res.json();
-
-    if (!(await RNFS.exists(MEDIA_DIR))) {
-      await RNFS.mkdir(MEDIA_DIR);
-    }
-
-    // 🔥 LOOP EACH SECTION
-    for (let i = 1; i <= 3; i++) {
-      const sectionDir = `${MEDIA_DIR}/section${i}`;
-
-      if (!(await RNFS.exists(sectionDir))) {
-        await RNFS.mkdir(sectionDir);
-      }
-
-      const localFiles = await RNFS.readDir(sectionDir);
-
-      const serverSectionFiles = serverFiles.filter(
-        (f: any) => f.section === i
-      );
-
-      // 🔥 DELETE removed files
-      for (const local of localFiles) {
-        const stillExists = serverSectionFiles.find(
-          (s: any) => s.name === local.name
-        );
-
-        if (!stillExists) {
-          await RNFS.unlink(local.path);
-        }
-      }
-
-      // 🔥 DOWNLOAD new files
-      for (const file of serverSectionFiles) {
-        const localPath = `${sectionDir}/${file.name}`;
-
-        if (!(await RNFS.exists(localPath))) {
-          await RNFS.downloadFile({
-            fromUrl: SERVER + file.url,
-            toFile: localPath,
-          }).promise;
-        }
-      }
-    }
 
     return true;
   } catch (e) {
@@ -68,25 +37,21 @@ export async function syncMedia() {
 }
 
 export async function getMediaFiles(sectionIndex = 0) {
-  const SERVER = getServer();
-  if (!SERVER) return [];
+  const server = getServer();
+  if (!server) return [];
 
-  const DEVICE_ID = await DeviceIdModule.getDeviceId();
+  const deviceId = await DeviceIdModule.getDeviceId();
+  const res = await fetch(
+    `${server}/media-list?deviceId=${deviceId}&ts=${Date.now()}`
+  );
+  const list = await res.json();
 
-const res = await fetch(
-  `${SERVER}/media-list?deviceId=${DEVICE_ID}`
-);
+  const filtered = list.filter(
+    (file: any) => file.section === sectionIndex + 1
+  );
 
-const list = await res.json();
-
-const filtered = list.filter(
-  (file: any) => file.section === sectionIndex + 1
-);
   return filtered.map((file: any) => ({
     ...file,
-   localPath: `${MEDIA_DIR}/section${file.section}/${file.name}`,
+    remoteUrl: server + file.url,
   }));
 }
-
-
-

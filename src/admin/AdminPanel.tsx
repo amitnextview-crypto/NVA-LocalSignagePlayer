@@ -25,12 +25,22 @@ export default function AdminPanel({ visible, onClose }: any) {
     }).start();
   }, [visible]);
 
-  const saveManualServer = async () => {
-    if (!manualInput.startsWith("http")) return Alert.alert("Enter full URL, e.g., http://192.168.1.5:8080");
-    await setServer(manualInput);
-    updateServer(manualInput);
-    Alert.alert("Saved CMS IP", manualInput);
-  };
+const saveManualServer = async () => {
+  if (!manualInput.startsWith("http")) {
+    return Alert.alert("Enter full URL, e.g., http://192.168.1.5:8080");
+  }
+
+  await setServer(manualInput);
+
+  Alert.alert("Saved CMS URL", manualInput);
+
+  // 🔥 Close panel
+  onClose();
+
+  // 🔥 Force full app reload
+  const { DevSettings } = require("react-native");
+  DevSettings.reload();
+};
 
   if (!visible) return null;
 

@@ -1,13 +1,10 @@
-
 import { NetworkInfo } from "react-native-network-info";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
 let SERVER = "";
 const SERVER_KEY = "CMS_SERVER";
+const FETCH_TIMEOUT = 400;
 
-const FETCH_TIMEOUT = 800;
-
-// fetch with timeout
 function fetchWithTimeout(url: string, timeout = FETCH_TIMEOUT): Promise<Response> {
   return Promise.race([
     fetch(url),
@@ -17,13 +14,14 @@ function fetchWithTimeout(url: string, timeout = FETCH_TIMEOUT): Promise<Respons
   ]);
 }
 
-// Discover CMS: try cached first, then fallback, then manual input
 export async function findCMS(): Promise<string> {
+
+  // 🔥 1. Try saved server first
   const saved = await AsyncStorage.getItem(SERVER_KEY);
 
   if (saved) {
     try {
-      const res = await fetch(saved + "/config");
+      const res = await fetchWithTimeout(saved + "/config");
       if (res.ok) {
         SERVER = saved;
         return saved;
@@ -31,19 +29,54 @@ export async function findCMS(): Promise<string> {
     } catch {}
   }
 
+  // 🔥 2. Auto scan local network
+  try {
+   const gateway = await NetworkInfo.getGatewayIPAddress();
+
+if (!gateway) {
+  console.log("Gateway not found");
   return "";
 }
 
-// Get current server
+const lastDot = gateway.lastIndexOf(".");
+if (lastDot === -1) {
+  console.log("Invalid gateway format");
+  return "";
+}
+
+const base = gateway.substring(0, lastDot);
+
+    for (let i = 1; i < 255; i++) {
+      const testUrl = `http://${base}.${i}:8080`;
+
+      try {
+        const res = await fetchWithTimeout(testUrl + "/config");
+        if (res.ok) {
+          SERVER = testUrl;
+          await AsyncStorage.setItem(SERVER_KEY, testUrl);
+          return testUrl;
+        }
+      } catch {}
+    }
+  } catch (e) {
+    console.log("Network scan failed", e);
+  }
+
+  return "";
+}
+
 export function getServer(): string {
   return SERVER;
 }
 
-// Save server manually (via AdminPanel input)
 export async function setServer(url: string) {
   SERVER = url;
   await AsyncStorage.setItem(SERVER_KEY, url);
 }
+
+
+
+
 
 
 

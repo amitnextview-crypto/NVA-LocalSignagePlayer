@@ -1,29 +1,56 @@
 {
   "orientation": "horizontal",
-  "layout": "fullscreen",
-  "slideDuration": 2,
+  "layout": "grid3",
+  "grid3Layout": "stack-h",
+  "gridRatio": "1:1:1",
+  "slideDuration": 1,
   "animation": "slide",
   "bgColor": "#000000",
   "sections": [
     {
       "slideDirection": "top",
-      "slideDuration": 5
+      "slideDuration": 1,
+      "sourceType": "multimedia",
+      "sourceUrl": ""
     },
     {
       "slideDirection": "right",
-      "slideDuration": 5
+      "slideDuration": 10,
+      "sourceType": "multimedia",
+      "sourceUrl": ""
     },
     {
       "slideDirection": "bottom",
-      "slideDuration": 5
+      "slideDuration": 5,
+      "sourceType": "multimedia",
+      "sourceUrl": ""
     }
   ],
   "ticker": {
-    "text": "welcome to nextview 43444444",
-    "color": "#fcfcfc",
-    "bgColor": "#010e0e",
-    "speed": 12,
-    "fontSize": 57,
-    "position": "top"
+    "text": "hhhhhhhhhhhhhhhhhhhhhhhhhhhh",
+    "color": "#fffafa",
+    "bgColor": "#aceb00",
+    "speed": 2,
+    "fontSize": 32,
+    "position": "bottom"
+  },
+  "schedule": {
+    "enabled": false,
+    "start": "14:42",
+    "end": "14:55",
+    "days": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6
+    ],
+    "fallbackMode": "image",
+    "fallbackMessage": "store closed at 9:00 pm",
+    "fallbackImageUrl": "https://www.nexttechgroup.com/nextview/public/Profile-PIC.png",
+    "fallbackTextColor": "#ffffff",
+    "fallbackBgColor": "#000000"
   }
 }
