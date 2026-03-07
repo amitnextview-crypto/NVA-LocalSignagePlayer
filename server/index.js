@@ -1,10 +1,31 @@
 const express = require("express");
 const cors = require("cors");
+const fs = require("fs");
 const path = require("path");
 const http = require("http");
 const { Server } = require("socket.io");
 const os = require("os");
 const { exec } = require("child_process");
+
+// Runtime writable base path (user-local in pkg mode to avoid permission issues)
+const runtimeBasePath = process.pkg
+  ? path.join(
+      process.env.LOCALAPPDATA ||
+        process.env.APPDATA ||
+        path.dirname(process.execPath),
+      "NVA SignagePlayerTV"
+    )
+  : __dirname;
+
+// Asset base path (__dirname points to snapshot when packed by pkg)
+const assetBasePath = __dirname;
+
+global.runtimeBasePath = runtimeBasePath;
+global.assetBasePath = assetBasePath;
+
+if (!fs.existsSync(runtimeBasePath)) {
+  fs.mkdirSync(runtimeBasePath, { recursive: true });
+}
 
 const configRoutes = require("./routes/config");
 const uploadRoutes = require("./routes/upload");
@@ -15,18 +36,13 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Writable base path
-const basePath = process.pkg
-  ? path.dirname(process.execPath)
-  : __dirname;
-
 app.use("/media-list", mediaRoutes);
 app.use("/upload", uploadRoutes);
 app.use("/config", configRoutes);
-app.use("/", express.static(path.join(basePath, "public")));
+app.use("/", express.static(path.join(assetBasePath, "public")));
 app.use(
   "/media",
-  express.static(path.join(basePath, "uploads"), {
+  express.static(path.join(runtimeBasePath, "uploads"), {
     setHeaders: (res, filePath) => {
       if (filePath.endsWith(".mp4")) {
         res.setHeader("Content-Type", "video/mp4");
@@ -186,6 +202,18 @@ function getLocalIP() {
 
 // Start server
 const PORT = 8080;
+
+server.on("error", (err) => {
+  if (err?.code === "EADDRINUSE") {
+    console.log(`Port ${PORT} already in use. Opening existing CMS session.`);
+    exec(`start http://localhost:${PORT}`);
+    process.exit(0);
+    return;
+  }
+
+  console.error("Server startup failed:", err);
+  process.exit(1);
+});
 
 server.listen(PORT, "0.0.0.0", () => {
   const ip = getLocalIP();

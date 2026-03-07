@@ -6,13 +6,15 @@
   "pkg": {
     "assets": [
       "public/**/*",
-      "uploads/**/*",
-      "data/**/*"
+      "data/configs/default.json",
+      "node_modules/ffmpeg-static/ffmpeg.exe"
     ]
   },
   "scripts": {
     "start": "node index.js",
-    "build": "pkg . --targets node18-win-x64 --output SignageCMS"
+    "build": "pkg . --targets node18-win-x64 --output NVA-SignagePlayerTV",
+    "build:exe": "pkg . --targets node18-win-x64 --output NVA-SignagePlayerTV",
+    "build:installer": "powershell -ExecutionPolicy Bypass -File .\\installer\\build-installer.ps1"
   },
   "dependencies": {
     "cors": "^2.8.5",

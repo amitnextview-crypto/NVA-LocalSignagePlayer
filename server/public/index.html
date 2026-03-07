@@ -12,14 +12,16 @@
       <div class="hero-brand">
         <img src="nvlogo.png" alt="SignagePlayerTV Logo" class="hero-logo" />
         <div class="hero-copy">
-          <p class="eyebrow">SignagePlayerTV - Digital Signage Control Developed BY <span class="author-highlight">Amit Maddheshiya</span></p>
+          <p class="eyebrow">SignagePlayerTV - Developed BY <span class="author-highlight">Amit Maddheshiya</span></p>
         <h1>Signage CMS</h1>
         <p class="hero-sub">Configure layout, upload media, and push live updates to connected screens.</p>
         </div>
       </div>
       <div class="hero-actions">
+        <button class="btn primary" onclick="window.location.reload()">Refresh Page</button>
         <button class="btn primary" onclick="setAutoReopen(true)">Auto Reopen ON</button>
         <button class="btn warning" onclick="setAutoReopen(false)">Auto Reopen OFF</button>
+        <button class="btn warning" onclick="clearDeviceCache()">Clear Device Cache</button>
         <button class="btn danger" onclick="clearDeviceData()">Clear Device Data</button>
         <button class="btn warning" onclick="restartDeviceApp()">Restart Device App</button>
       </div>
@@ -28,8 +30,13 @@
     <div class="main-grid">
       <div class="left-col">
         <section class="card compact-card">
-          <h2>Select Device</h2>
-          <p class="section-help">Choose one device or apply to all connected devices.</p>
+          <div class="device-toolbar">
+            <div>
+              <h2>Select Device</h2>
+              <p class="section-help">Choose one device or apply to all connected devices.</p>
+            </div>
+            <button class="btn primary" type="button" onclick="toggleDeviceDashboard()">Device Dashboard</button>
+          </div>
           <select id="deviceSelect">
             <option value="all">All Devices</option>
           </select>
@@ -38,12 +45,22 @@
         <section class="card compact-card">
           <h2>Upload Media</h2>
           <p class="section-help">Upload media by section. Existing section files will be replaced after successful upload.</p>
+          <p class="section-help">PDF files are converted into image pages before upload so devices can switch pages instantly.</p>
           <div id="uploadSections"></div>
           <div class="sub-card alerts-card">
             <h3>Device Alerts</h3>
             <p class="section-help">Offline, closed app, and runtime errors will appear here.</p>
             <div id="deviceAlertsList" class="alerts-list">
               <div class="alerts-empty">Loading device status...</div>
+            </div>
+          </div>
+
+          <div class="sub-card alerts-card">
+            <h3>App Update</h3>
+            <p class="section-help">Upload latest APK and push update command to selected device.</p>
+            <div class="update-box">
+              <input type="file" id="appUpdateFile" accept=".apk,application/vnd.android.package-archive" />
+              <button class="btn primary" onclick="uploadAndInstallAppUpdate()">Upload And Update App</button>
             </div>
           </div>
         </section>
@@ -226,6 +243,54 @@
       </div>
       <p id="uploadProgressText" class="upload-progress-text">0%</p>
     </div>
+
+    <div id="deviceDashboardOverlay" class="dashboard-overlay hidden">
+      <div class="dashboard-panel">
+        <div class="dashboard-header">
+          <div>
+            <h2>Device Dashboard</h2>
+            <p class="section-help">Per-device health, storage, app version, and runtime status.</p>
+          </div>
+          <button class="btn warning" type="button" onclick="toggleDeviceDashboard(false)">Close</button>
+        </div>
+
+        <div class="health-summary-grid">
+          <div class="health-stat">
+            <div class="health-label">Online</div>
+            <div id="summaryOnline" class="health-value">0</div>
+          </div>
+          <div class="health-stat">
+            <div class="health-label">Offline</div>
+            <div id="summaryOffline" class="health-value">0</div>
+          </div>
+          <div class="health-stat">
+            <div class="health-label">Errors</div>
+            <div id="summaryErrors" class="health-value">0</div>
+          </div>
+          <div class="health-stat">
+            <div class="health-label">Free Storage</div>
+            <div id="summaryFreeStorage" class="health-value">-</div>
+          </div>
+        </div>
+
+        <div id="selectedDeviceDetails" class="selected-device-details">
+          Select a device to view detailed health.
+        </div>
+
+        <div class="dashboard-tools">
+          <input
+            type="text"
+            id="deviceDashboardSearch"
+            placeholder="Search device id, version, state..."
+            oninput="renderHealthSummary(window.__latestDeviceStatusList || [])"
+          />
+        </div>
+
+        <div id="deviceDashboardList" class="dashboard-device-list"></div>
+      </div>
+    </div>
+
+    <div id="noticeStack" class="notice-stack" aria-live="polite"></div>
   </div>
 
   <script src="app.js"></script>

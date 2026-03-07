@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { Image, Text, View } from "react-native";
-import Video from "react-native-video";
+import Video, { BufferingStrategyType } from "react-native-video";
 import SlideRenderer from "./SlideRenderer";
 import Ticker from "./Ticker";
 
@@ -54,7 +54,7 @@ function isScheduleActive(schedule: any): boolean {
   return nowMinutes >= start || nowMinutes < end;
 }
 
-export default function PlayerScreen({ config, mediaVersion }: any) {
+export default function PlayerScreen({ config, mediaVersion, uploadProcessingBySection, onPlaybackChange }: any) {
   const [scheduleOn, setScheduleOn] = useState(true);
   const tickerHeight = config?.ticker?.text
     ? (config.ticker.fontSize || 24) + 12
@@ -76,13 +76,34 @@ export default function PlayerScreen({ config, mediaVersion }: any) {
       return (
         <View style={{ flex: 1, flexDirection: "row", gap: GRID_GAP }}>
           <View style={{ flex: a, marginRight: GRID_GAP / 2 }}>
-            <SlideRenderer key={mediaVersion + "-3"} sectionIndex={0} config={config} mediaVersion={mediaVersion} />
+            <SlideRenderer
+              key="section-0"
+              sectionIndex={0}
+              config={config}
+              mediaVersion={mediaVersion}
+              processingMessage={uploadProcessingBySection?.[1] || ""}
+              onPlaybackChange={onPlaybackChange}
+            />
           </View>
           <View style={{ flex: b, marginHorizontal: GRID_GAP / 2 }}>
-            <SlideRenderer key={mediaVersion + "-4"} sectionIndex={1} config={config} mediaVersion={mediaVersion} />
+            <SlideRenderer
+              key="section-1"
+              sectionIndex={1}
+              config={config}
+              mediaVersion={mediaVersion}
+              processingMessage={uploadProcessingBySection?.[2] || ""}
+              onPlaybackChange={onPlaybackChange}
+            />
           </View>
           <View style={{ flex: c, marginLeft: GRID_GAP / 2 }}>
-            <SlideRenderer key={mediaVersion + "-5"} sectionIndex={2} config={config} mediaVersion={mediaVersion} />
+            <SlideRenderer
+              key="section-2"
+              sectionIndex={2}
+              config={config}
+              mediaVersion={mediaVersion}
+              processingMessage={uploadProcessingBySection?.[3] || ""}
+              onPlaybackChange={onPlaybackChange}
+            />
           </View>
         </View>
       );
@@ -94,14 +115,35 @@ export default function PlayerScreen({ config, mediaVersion }: any) {
         <View style={{ flex: 1, gap: GRID_GAP }}>
           <View style={{ flex: top, flexDirection: "row", gap: GRID_GAP }}>
             <View style={{ flex: 1, marginRight: GRID_GAP / 2 }}>
-              <SlideRenderer key={mediaVersion + "-3"} sectionIndex={0} config={config} mediaVersion={mediaVersion} />
+              <SlideRenderer
+                key="section-0"
+                sectionIndex={0}
+                config={config}
+                mediaVersion={mediaVersion}
+                processingMessage={uploadProcessingBySection?.[1] || ""}
+                onPlaybackChange={onPlaybackChange}
+              />
             </View>
             <View style={{ flex: 1, marginLeft: GRID_GAP / 2 }}>
-              <SlideRenderer key={mediaVersion + "-4"} sectionIndex={1} config={config} mediaVersion={mediaVersion} />
+              <SlideRenderer
+                key="section-1"
+                sectionIndex={1}
+                config={config}
+                mediaVersion={mediaVersion}
+                processingMessage={uploadProcessingBySection?.[2] || ""}
+                onPlaybackChange={onPlaybackChange}
+              />
             </View>
           </View>
           <View style={{ flex: bottom }}>
-            <SlideRenderer key={mediaVersion + "-5"} sectionIndex={2} config={config} mediaVersion={mediaVersion} />
+            <SlideRenderer
+              key="section-2"
+              sectionIndex={2}
+              config={config}
+              mediaVersion={mediaVersion}
+              processingMessage={uploadProcessingBySection?.[3] || ""}
+              onPlaybackChange={onPlaybackChange}
+            />
           </View>
         </View>
       );
@@ -112,14 +154,32 @@ export default function PlayerScreen({ config, mediaVersion }: any) {
       return (
         <View style={{ flex: 1, gap: GRID_GAP }}>
           <View style={{ flex: top }}>
-            <SlideRenderer key={mediaVersion + "-3"} sectionIndex={0} config={config} mediaVersion={mediaVersion} />
+            <SlideRenderer
+              key="section-0"
+              sectionIndex={0}
+              config={config}
+              mediaVersion={mediaVersion}
+              processingMessage={uploadProcessingBySection?.[1] || ""}
+            />
           </View>
           <View style={{ flex: bottom, flexDirection: "row", gap: GRID_GAP }}>
             <View style={{ flex: 1, marginRight: GRID_GAP / 2 }}>
-              <SlideRenderer key={mediaVersion + "-4"} sectionIndex={1} config={config} mediaVersion={mediaVersion} />
+              <SlideRenderer
+                key="section-1"
+                sectionIndex={1}
+                config={config}
+                mediaVersion={mediaVersion}
+                processingMessage={uploadProcessingBySection?.[2] || ""}
+              />
             </View>
             <View style={{ flex: 1, marginLeft: GRID_GAP / 2 }}>
-              <SlideRenderer key={mediaVersion + "-5"} sectionIndex={2} config={config} mediaVersion={mediaVersion} />
+              <SlideRenderer
+                key="section-2"
+                sectionIndex={2}
+                config={config}
+                mediaVersion={mediaVersion}
+                processingMessage={uploadProcessingBySection?.[3] || ""}
+              />
             </View>
           </View>
         </View>
@@ -130,13 +190,34 @@ export default function PlayerScreen({ config, mediaVersion }: any) {
     return (
       <View style={{ flex: 1 }}>
         <View style={{ flex: a, marginBottom: GRID_GAP / 2 }}>
-          <SlideRenderer key={mediaVersion + "-3"} sectionIndex={0} config={config} mediaVersion={mediaVersion} />
+          <SlideRenderer
+            key="section-0"
+            sectionIndex={0}
+            config={config}
+            mediaVersion={mediaVersion}
+            processingMessage={uploadProcessingBySection?.[1] || ""}
+            onPlaybackChange={onPlaybackChange}
+          />
         </View>
         <View style={{ flex: b, marginVertical: GRID_GAP / 2 }}>
-          <SlideRenderer key={mediaVersion + "-4"} sectionIndex={1} config={config} mediaVersion={mediaVersion} />
+          <SlideRenderer
+            key="section-1"
+            sectionIndex={1}
+            config={config}
+            mediaVersion={mediaVersion}
+            processingMessage={uploadProcessingBySection?.[2] || ""}
+            onPlaybackChange={onPlaybackChange}
+          />
         </View>
         <View style={{ flex: c, marginTop: GRID_GAP / 2 }}>
-          <SlideRenderer key={mediaVersion + "-5"} sectionIndex={2} config={config} mediaVersion={mediaVersion} />
+          <SlideRenderer
+            key="section-2"
+            sectionIndex={2}
+            config={config}
+            mediaVersion={mediaVersion}
+            processingMessage={uploadProcessingBySection?.[3] || ""}
+            onPlaybackChange={onPlaybackChange}
+          />
         </View>
       </View>
     );
@@ -147,10 +228,24 @@ export default function PlayerScreen({ config, mediaVersion }: any) {
     return (
       <View style={{ flex: 1, flexDirection: "row", gap: GRID_GAP }}>
         <View style={{ flex: left, marginRight: GRID_GAP / 2 }}>
-          <SlideRenderer key={mediaVersion + "-1"} config={config} sectionIndex={0} mediaVersion={mediaVersion} />
+          <SlideRenderer
+            key="section-0"
+            config={config}
+            sectionIndex={0}
+            mediaVersion={mediaVersion}
+            processingMessage={uploadProcessingBySection?.[1] || ""}
+            onPlaybackChange={onPlaybackChange}
+          />
         </View>
         <View style={{ flex: right, marginLeft: GRID_GAP / 2 }}>
-          <SlideRenderer key={mediaVersion + "-2"} config={config} sectionIndex={1} mediaVersion={mediaVersion} />
+          <SlideRenderer
+            key="section-1"
+            config={config}
+            sectionIndex={1}
+            mediaVersion={mediaVersion}
+            processingMessage={uploadProcessingBySection?.[2] || ""}
+            onPlaybackChange={onPlaybackChange}
+          />
         </View>
       </View>
     );
@@ -164,6 +259,17 @@ export default function PlayerScreen({ config, mediaVersion }: any) {
 
     if (fallbackMode === "image" && fallbackMediaUrl) {
       if (isFallbackVideo) {
+        const streamingBufferConfig = {
+          minBufferMs: 3000,
+          maxBufferMs: 15000,
+          bufferForPlaybackMs: 1500,
+          bufferForPlaybackAfterRebufferMs: 2500,
+          backBufferDurationMs: 0,
+          cacheSizeMB: 0,
+          maxHeapAllocationPercent: 0.2,
+          minBufferMemoryReservePercent: 0.25,
+          minBackBufferMemoryReservePercent: 0.25,
+        };
         return (
           <View style={{ flex: 1, backgroundColor: fallbackBgColor }}>
             <Video
@@ -177,6 +283,8 @@ export default function PlayerScreen({ config, mediaVersion }: any) {
               muted
               playInBackground={false}
               ignoreSilentSwitch="ignore"
+              bufferingStrategy={BufferingStrategyType.DEPENDING_ON_MEMORY}
+              bufferConfig={streamingBufferConfig}
             />
           </View>
         );
@@ -231,7 +339,14 @@ export default function PlayerScreen({ config, mediaVersion }: any) {
         }}
       >
         {config.layout === "fullscreen" && (
-          <SlideRenderer key={mediaVersion + "-0"} config={config} sectionIndex={0} mediaVersion={mediaVersion} />
+          <SlideRenderer
+            key="section-0"
+            config={config}
+            sectionIndex={0}
+            mediaVersion={mediaVersion}
+            processingMessage={uploadProcessingBySection?.[1] || ""}
+            onPlaybackChange={onPlaybackChange}
+          />
         )}
         {config.layout === "grid2" && renderGrid2()}
         {config.layout === "grid3" && renderGrid3()}

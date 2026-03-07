@@ -17,7 +17,7 @@ class KioskKeepAliveService : Service() {
     private const val CHANNEL_ID = "signage_keepalive_channel"
     private const val CHANNEL_NAME = "Signage Keep Alive"
     private const val NOTIF_ID = 4401
-    private const val REOPEN_DELAY_MS = 1200L
+    private const val WATCHDOG_INTERVAL_MS = 10000L
     private const val REOPEN_REQ_CODE = 7202
     private const val PREFS_NAME = "kiosk_prefs"
     private const val KEY_AUTO_REOPEN_ENABLED = "auto_reopen_enabled"
@@ -92,7 +92,7 @@ class KioskKeepAliveService : Service() {
     )
 
     val alarmManager = getSystemService(Context.ALARM_SERVICE) as AlarmManager
-    val triggerAt = System.currentTimeMillis() + REOPEN_DELAY_MS
+    val triggerAt = System.currentTimeMillis() + WATCHDOG_INTERVAL_MS
 
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
       alarmManager.setExactAndAllowWhileIdle(

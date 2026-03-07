@@ -90,3 +90,41 @@ logs/
 # RN cache
 .expo/
 .expo-shared/
+
+# executables
+*.exe
+
+# installer output
+server/installer/output/
+
+# uploads
+server/uploads/
+
+# vscode
+.vscode/
+
+# Android build
+*.apk
+*.aab
+
+# Android build folders
+android/app/build/
+android/build/
+
+# executables
+*.exe
+*.apk
+*.aab
+
+# installers
+server/installer/output/
+
+# uploads
+server/uploads/
+
+# build folders
+android/app/build/
+android/build/
+
+# vscode
+.vscode/

@@ -6,11 +6,51 @@ const multer = require("multer");
 const router = express.Router();
 
 const basePath = process.pkg
-  ? path.dirname(process.execPath)
+  ? (global.runtimeBasePath || path.dirname(process.execPath))
+  : path.join(__dirname, "..");
+const assetBasePath = process.pkg
+  ? (global.assetBasePath || path.join(__dirname, ".."))
   : path.join(__dirname, "..");
 
 const CONFIG_DIR = path.join(basePath, "data", "configs");
 const FALLBACK_DIR = path.join(basePath, "uploads", "fallbacks");
+const UPDATE_DIR = path.join(basePath, "uploads", "updates");
+const DEFAULT_CONFIG_PATH = path.join(CONFIG_DIR, "default.json");
+const ASSET_DEFAULT_CONFIG_PATH = path.join(assetBasePath, "data", "configs", "default.json");
+
+const DEFAULT_CONFIG_TEMPLATE = {
+  orientation: "horizontal",
+  layout: "fullscreen",
+  grid3Layout: "stack-v",
+  gridRatio: "1:1:1",
+  slideDuration: 5,
+  animation: "slide",
+  bgColor: "#000000",
+  sections: [
+    { slideDirection: "left", slideDuration: 5, sourceType: "multimedia", sourceUrl: "" },
+    { slideDirection: "left", slideDuration: 5, sourceType: "multimedia", sourceUrl: "" },
+    { slideDirection: "left", slideDuration: 5, sourceType: "multimedia", sourceUrl: "" },
+  ],
+  ticker: {
+    text: "",
+    color: "#ffffff",
+    bgColor: "#000000",
+    speed: 6,
+    fontSize: 24,
+    position: "bottom",
+  },
+  schedule: {
+    enabled: false,
+    start: "09:00",
+    end: "18:00",
+    days: [0, 1, 2, 3, 4, 5, 6],
+    fallbackMode: "black",
+    fallbackMessage: "Playback is currently scheduled off.",
+    fallbackImageUrl: "",
+    fallbackTextColor: "#ffffff",
+    fallbackBgColor: "#000000",
+  },
+};
 
 if (!fs.existsSync(CONFIG_DIR)) {
   fs.mkdirSync(CONFIG_DIR, { recursive: true });
@@ -18,6 +58,27 @@ if (!fs.existsSync(CONFIG_DIR)) {
 if (!fs.existsSync(FALLBACK_DIR)) {
   fs.mkdirSync(FALLBACK_DIR, { recursive: true });
 }
+if (!fs.existsSync(UPDATE_DIR)) {
+  fs.mkdirSync(UPDATE_DIR, { recursive: true });
+}
+
+function ensureDefaultConfig() {
+  try {
+    if (fs.existsSync(DEFAULT_CONFIG_PATH)) return;
+
+    if (fs.existsSync(ASSET_DEFAULT_CONFIG_PATH)) {
+      const raw = fs.readFileSync(ASSET_DEFAULT_CONFIG_PATH, "utf-8");
+      fs.writeFileSync(DEFAULT_CONFIG_PATH, raw);
+      return;
+    }
+
+    fs.writeFileSync(DEFAULT_CONFIG_PATH, JSON.stringify(DEFAULT_CONFIG_TEMPLATE, null, 2));
+  } catch (_e) {
+    // best effort
+  }
+}
+
+ensureDefaultConfig();
 
 const fallbackUpload = multer({
   storage: multer.diskStorage({
@@ -43,6 +104,25 @@ const fallbackUpload = multer({
   },
 });
 
+const appUpdateUpload = multer({
+  storage: multer.diskStorage({
+    destination: (_req, _file, cb) => cb(null, UPDATE_DIR),
+    filename: (_req, file, cb) => {
+      const ext = path.extname(file.originalname || "").toLowerCase();
+      const safeExt = ext === ".apk" ? ".apk" : ".bin";
+      cb(null, `NVA-SignagePlayerTV-update${safeExt}`);
+    },
+  }),
+  limits: { fileSize: 2 * 1024 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    const ext = path.extname(file.originalname || "").toLowerCase();
+    if (ext !== ".apk") {
+      return cb(new Error("Only APK files are allowed"));
+    }
+    cb(null, true);
+  },
+});
+
 router.get("/", (req, res) => {
   res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
   res.setHeader("Pragma", "no-cache");
@@ -56,9 +136,9 @@ router.get("/", (req, res) => {
     const devicePath = path.join(CONFIG_DIR, `${deviceId}.json`);
     filePath = fs.existsSync(devicePath)
       ? devicePath
-      : path.join(CONFIG_DIR, "default.json");
+      : DEFAULT_CONFIG_PATH;
   } else {
-    filePath = path.join(CONFIG_DIR, "default.json");
+    filePath = DEFAULT_CONFIG_PATH;
   }
 
   const data = fs.readFileSync(filePath, "utf-8");
@@ -69,7 +149,7 @@ router.post("/", (req, res) => {
   const { targetDevice, config } = req.body;
 
   if (targetDevice === "all") {
-    const defaultPath = path.join(CONFIG_DIR, "default.json");
+    const defaultPath = DEFAULT_CONFIG_PATH;
     fs.writeFileSync(defaultPath, JSON.stringify(config, null, 2));
 
     const files = fs.readdirSync(CONFIG_DIR);
@@ -139,6 +219,28 @@ router.post("/restart-device", (req, res) => {
   return res.json({ success: false });
 });
 
+router.post("/clear-cache", (req, res) => {
+  const { targetDevice } = req.body || {};
+
+  if (targetDevice === "all") {
+    if (global.io) {
+      global.io.emit("clear-cache");
+      console.log("Clear cache command sent to: all devices");
+      return res.json({ success: true });
+    }
+    return res.json({ success: false });
+  }
+
+  if (global.io && global.connectedDevices?.[targetDevice]) {
+    const socketId = global.connectedDevices[targetDevice];
+    global.io.to(socketId).emit("clear-cache");
+    console.log("Clear cache command sent to:", targetDevice);
+    return res.json({ success: true });
+  }
+
+  return res.json({ success: false });
+});
+
 router.post("/auto-reopen", (req, res) => {
   const { targetDevice, enabled } = req.body || {};
   const flag = !!enabled;
@@ -154,6 +256,48 @@ router.post("/auto-reopen", (req, res) => {
   if (global.io && global.connectedDevices?.[targetDevice]) {
     const socketId = global.connectedDevices[targetDevice];
     global.io.to(socketId).emit("set-auto-reopen", { enabled: flag });
+    return res.json({ success: true });
+  }
+
+  return res.json({ success: false });
+});
+
+router.post("/upload-app-update", (req, res) => {
+  appUpdateUpload.single("file")(req, res, (err) => {
+    if (err) {
+      return res.status(400).json({ error: err.message || "APK upload failed" });
+    }
+    if (!req.file?.filename) {
+      return res.status(400).json({ error: "No APK uploaded" });
+    }
+
+    return res.json({
+      success: true,
+      apkUrl: `/media/updates/${req.file.filename}`,
+      fileName: req.file.filename,
+      size: Number(req.file.size || 0),
+    });
+  });
+});
+
+router.post("/install-app-update", (req, res) => {
+  const { targetDevice, apkUrl } = req.body || {};
+  const safeApkUrl = String(apkUrl || "").trim();
+  if (!safeApkUrl) {
+    return res.status(400).json({ success: false, error: "APK URL missing" });
+  }
+
+  if (targetDevice === "all") {
+    if (global.io) {
+      global.io.emit("install-app-update", { apkUrl: safeApkUrl });
+      return res.json({ success: true });
+    }
+    return res.json({ success: false });
+  }
+
+  if (global.io && global.connectedDevices?.[targetDevice]) {
+    const socketId = global.connectedDevices[targetDevice];
+    global.io.to(socketId).emit("install-app-update", { apkUrl: safeApkUrl });
     return res.json({ success: true });
   }
 

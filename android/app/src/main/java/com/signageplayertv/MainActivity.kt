@@ -21,7 +21,7 @@ import java.io.File
 class MainActivity : ReactActivity() {
 
   companion object {
-    private const val REOPEN_DELAY_MS = 5000L
+    private const val REOPEN_DELAY_MS = 10000L
     private const val REOPEN_REQ_CODE = 7201
     private const val PREFS_NAME = "kiosk_prefs"
     private const val KEY_AUTO_REOPEN_ENABLED = "auto_reopen_enabled"
@@ -29,6 +29,7 @@ class MainActivity : ReactActivity() {
 
   private val reopenHandler = Handler(Looper.getMainLooper())
   private val reopenRunnable = Runnable {
+    if (!isAutoReopenEnabled()) return@Runnable
     try {
       val launchIntent = packageManager.getLaunchIntentForPackage(packageName)
       launchIntent?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)

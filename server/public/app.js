@@ -1,4 +1,5 @@
 const SUPPORTED_FILE_EXT = /\.(mp4|mkv|webm|jpg|jpeg|png|txt|pdf)$/i;
+const VIDEO_FILE_EXT = /\.(mp4|mkv|webm)$/i;
 const MAX_FILES_PER_UPLOAD = 120;
 const HARD_FILE_SIZE_BYTES = 5 * 1024 * 1024 * 1024;
 const WARN_FILE_SIZE_BYTES = 700 * 1024 * 1024;
@@ -27,6 +28,150 @@ let previewSectionState = {
 let previewPollTimer = null;
 let alertsPollTimer = null;
 let selectedGridRatio = "1:1:1";
+let latestDeviceStatusList = [];
+let isDeviceDashboardOpen = false;
+
+function removeActiveMessageDialogs() {
+  document.querySelectorAll(".message-overlay").forEach((el) => el.remove());
+}
+
+function getMessageGlyph(type) {
+  if (type === "success") return "✓";
+  if (type === "error") return "!";
+  if (type === "warning") return "!";
+  return "i";
+}
+
+function createMessageDialog({
+  type = "info",
+  title = "Message",
+  message = "",
+  actions = [],
+  closeOnBackdrop = false,
+}) {
+  const safeType = ["success", "error", "warning", "info"].includes(type)
+    ? type
+    : "info";
+
+  const overlay = document.createElement("div");
+  overlay.className = "message-overlay";
+
+  const panel = document.createElement("div");
+  panel.className = `message-panel message-${safeType}`;
+  panel.setAttribute("role", "dialog");
+  panel.setAttribute("aria-modal", "true");
+
+  const head = document.createElement("div");
+  head.className = "message-head";
+
+  const icon = document.createElement("div");
+  icon.className = `message-icon message-icon-${safeType}`;
+  icon.setAttribute("aria-hidden", "true");
+  icon.textContent = getMessageGlyph(safeType);
+
+  const titleWrap = document.createElement("div");
+  titleWrap.className = "message-title-wrap";
+
+  const titleEl = document.createElement("h3");
+  titleEl.className = "message-title";
+  titleEl.textContent = String(title || "Message");
+  titleWrap.appendChild(titleEl);
+
+  const typeTag = document.createElement("div");
+  typeTag.className = "message-type-tag";
+  typeTag.textContent = safeType.toUpperCase();
+  titleWrap.appendChild(typeTag);
+
+  head.appendChild(icon);
+  head.appendChild(titleWrap);
+
+  const body = document.createElement("div");
+  body.className = "message-body";
+  body.textContent = String(message || "");
+
+  const footer = document.createElement("div");
+  footer.className = "message-actions";
+
+  actions.forEach((action) => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = `btn ${action.variant || "primary"} message-btn`;
+    btn.textContent = action.label || "OK";
+    btn.addEventListener("click", () => action.onClick?.());
+    footer.appendChild(btn);
+  });
+
+  panel.appendChild(head);
+  panel.appendChild(body);
+  panel.appendChild(footer);
+  overlay.appendChild(panel);
+  document.body.appendChild(overlay);
+
+  if (closeOnBackdrop) {
+    overlay.addEventListener("click", (event) => {
+      if (event.target === overlay) {
+        actions[0]?.onClick?.();
+      }
+    });
+  }
+
+  return { overlay, panel };
+}
+
+function showNotice(type, title, message, durationMs = 4200) {
+  removeActiveMessageDialogs();
+
+  const { overlay } = createMessageDialog({
+    type,
+    title,
+    message,
+    closeOnBackdrop: true,
+    actions: [
+      {
+        label: "OK",
+        variant: "primary",
+        onClick: () => overlay.remove(),
+      },
+    ],
+  });
+
+  if (durationMs > 0) {
+    setTimeout(() => {
+      if (overlay.isConnected) overlay.remove();
+    }, durationMs);
+  }
+}
+
+function showConfirmDialog(title, message, confirmText = "Confirm", cancelText = "Cancel") {
+  removeActiveMessageDialogs();
+  return new Promise((resolve) => {
+    const onClose = (result) => {
+      if (overlay.isConnected) overlay.remove();
+      document.removeEventListener("keydown", onKeyDown);
+      resolve(result);
+    };
+
+    const onKeyDown = (event) => {
+      if (event.key === "Escape") onClose(false);
+      if (event.key === "Enter") onClose(true);
+    };
+
+    const { overlay, panel } = createMessageDialog({
+      type: "warning",
+      title,
+      message,
+      actions: [
+        { label: cancelText, variant: "warning", onClick: () => onClose(false) },
+        { label: confirmText, variant: "primary", onClick: () => onClose(true) },
+      ],
+      closeOnBackdrop: true,
+    });
+
+    document.addEventListener("keydown", onKeyDown);
+    const buttons = panel.querySelectorAll(".message-btn");
+    (buttons[buttons.length - 1] || buttons[0])?.focus();
+  });
+}
 
 const RATIO_PRESETS = {
   fullscreen: [{ value: "1:1", label: "Default" }],
@@ -132,21 +277,96 @@ function uploadWithProgress(url, formData, onProgress) {
     xhr.onload = () => {
       if (xhr.status >= 200 && xhr.status < 300) {
         resolve(xhr.responseText);
-      } else {
-        let message = `Upload failed with status ${xhr.status}`;
-        try {
-          const parsed = JSON.parse(xhr.responseText || "{}");
-          if (parsed?.error) message = parsed.error;
-        } catch (_e) {
-          if (xhr.responseText) message = xhr.responseText;
-        }
-        reject(new Error(message));
+        return;
       }
+      reject(new Error(parseUploadErrorResponse(xhr.status, xhr.responseText)));
     };
 
     xhr.onerror = () => reject(new Error("Network error during upload"));
     xhr.send(formData);
   });
+}
+
+function parseUploadErrorResponse(status, responseText) {
+  const statusCode = Number(status || 0);
+  const rawText = String(responseText || "").trim();
+
+  try {
+    const parsed = JSON.parse(rawText || "{}");
+    const msg = String(parsed?.error || parsed?.message || "").trim();
+    if (msg) return sanitizeUploadErrorMessage(msg, statusCode);
+  } catch (_e) {
+    // Non-JSON response: continue with text heuristics.
+  }
+
+  if (/<!doctype html/i.test(rawText) || /<html[\s>]/i.test(rawText)) {
+    if (statusCode === 404) {
+      return "Upload API endpoint not found. Please check CMS URL and try again.";
+    }
+    if (statusCode === 413) {
+      return `File too large. Please upload files below ${formatBytes(HARD_FILE_SIZE_BYTES)}.`;
+    }
+    if (statusCode >= 500) {
+      return "Server error during upload. Please check CMS server logs and retry.";
+    }
+    return "Invalid server response received during upload. Please verify CMS server is running correctly.";
+  }
+
+  if (!rawText) {
+    return statusCode
+      ? `Upload failed with status ${statusCode}.`
+      : "Upload failed due to an unexpected server response.";
+  }
+
+  return sanitizeUploadErrorMessage(rawText, statusCode);
+}
+
+function sanitizeUploadErrorMessage(message, statusCode) {
+  const raw = String(message || "").trim();
+  const lower = raw.toLowerCase();
+
+  if (/[a-z]:\\[^:\n]+/i.test(raw)) {
+    if (lower.includes("enospc")) {
+      return "Upload failed: server storage is full. Free disk space and retry.";
+    }
+    if (lower.includes("eacces") || lower.includes("eperm")) {
+      return "Upload failed: server does not have write permission for upload folder.";
+    }
+    if (lower.includes("enoent")) {
+      return "Upload failed: upload folder not found on server. Please restart CMS and try again.";
+    }
+    return "Upload failed due to a server file-system error. Please check CMS server permissions/logs.";
+  }
+
+  if (lower.includes("network error")) {
+    return "Network error during upload. Check local network/Wi-Fi and retry.";
+  }
+
+  if (statusCode === 413 || lower.includes("too large") || lower.includes("limit_file_size")) {
+    return `File too large. Please upload files below ${formatBytes(HARD_FILE_SIZE_BYTES)}.`;
+  }
+
+  if (statusCode === 404 || lower.includes("cannot post")) {
+    return "Upload API not found. Please open correct CMS URL and try again.";
+  }
+
+  if (lower.includes("unexpected field")) {
+    return "Upload request format is invalid. Refresh CMS page and try again.";
+  }
+
+  return raw;
+}
+
+async function canUploadVideosToSection(deviceId, section) {
+  const res = await fetch(`/media-list?deviceId=${deviceId}&ts=${Date.now()}`);
+  const files = await res.json();
+  const otherSectionHasVideo = (files || []).some((f) => {
+    const sec = Number(f.section || 1);
+    if (sec === Number(section)) return false;
+    const name = f.originalName || f.name || "";
+    return VIDEO_FILE_EXT.test(name);
+  });
+  return !otherSectionHasVideo;
 }
 
 function fileNameBase(name) {
@@ -177,19 +397,44 @@ function ensurePdfJsLoaded() {
   if (pdfJsLoadingPromise) return pdfJsLoadingPromise;
 
   pdfJsLoadingPromise = new Promise((resolve, reject) => {
-    const script = document.createElement("script");
-    script.src = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js";
-    script.onload = () => {
-      if (!window.pdfjsLib) {
-        reject(new Error("PDF engine not available"));
+    const candidates = [
+      {
+        script: "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js",
+        worker: "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js",
+      },
+      {
+        script: "https://unpkg.com/pdfjs-dist@3.11.174/build/pdf.min.js",
+        worker: "https://unpkg.com/pdfjs-dist@3.11.174/build/pdf.worker.min.js",
+      },
+    ];
+
+    let index = 0;
+    const tryNext = () => {
+      if (index >= candidates.length) {
+        reject(new Error("Failed to load PDF engine. Check internet on CMS PC and refresh."));
         return;
       }
-      window.pdfjsLib.GlobalWorkerOptions.workerSrc =
-        "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
-      resolve(window.pdfjsLib);
+
+      const candidate = candidates[index];
+      index += 1;
+      const script = document.createElement("script");
+      script.src = candidate.script;
+      script.onload = () => {
+        if (!window.pdfjsLib) {
+          tryNext();
+          return;
+        }
+        window.pdfjsLib.GlobalWorkerOptions.workerSrc = candidate.worker;
+        resolve(window.pdfjsLib);
+      };
+      script.onerror = () => {
+        script.remove();
+        tryNext();
+      };
+      document.head.appendChild(script);
     };
-    script.onerror = () => reject(new Error("Failed to load PDF engine"));
-    document.head.appendChild(script);
+
+    tryNext();
   });
 
   return pdfJsLoadingPromise;
@@ -776,6 +1021,167 @@ function formatStatusTime(value) {
   return dt.toLocaleString();
 }
 
+function formatMetaStorage(freeBytes, totalBytes) {
+  const free = Number(freeBytes || 0);
+  const total = Number(totalBytes || 0);
+  if (!total) return "-";
+  return `${formatBytes(free)} free / ${formatBytes(total)} total`;
+}
+
+function renderHealthSummary(statusList) {
+  const list = Array.isArray(statusList) ? statusList : [];
+  const online = list.filter((item) => !!item.online).length;
+  const offline = list.filter((item) => !item.online).length;
+  const errors = list.filter((item) => !!item.lastError).length;
+  const freeTotal = list.reduce((sum, item) => sum + Number(item?.meta?.freeBytes || 0), 0);
+
+  const onlineEl = document.getElementById("summaryOnline");
+  const offlineEl = document.getElementById("summaryOffline");
+  const errorsEl = document.getElementById("summaryErrors");
+  const storageEl = document.getElementById("summaryFreeStorage");
+  if (onlineEl) onlineEl.textContent = String(online);
+  if (offlineEl) offlineEl.textContent = String(offline);
+  if (errorsEl) errorsEl.textContent = String(errors);
+  if (storageEl) storageEl.textContent = freeTotal ? formatBytes(freeTotal) : "-";
+
+  const detailsEl = document.getElementById("selectedDeviceDetails");
+  if (!detailsEl) return;
+  const selectedDevice = document.getElementById("deviceSelect")?.value || "all";
+  if (selectedDevice === "all") {
+    detailsEl.textContent =
+      "All devices selected.\nChoose a single device to view detailed health, storage, app version, and last sync info.";
+  } else {
+    const item = list.find((entry) => entry.deviceId === selectedDevice);
+    if (!item) {
+      detailsEl.textContent = "Selected device is currently not connected to CMS.";
+    } else {
+      const lines = [
+        `Device: ${item.deviceId}`,
+        `State: ${item.online ? "Online" : "Offline"}`,
+        `Last Seen: ${formatStatusTime(item.lastSeen)}`,
+        `App Version: ${item.meta?.appVersion || "-"}`,
+        `Storage: ${formatMetaStorage(item.meta?.freeBytes || 0, item.meta?.totalBytes || 0)}`,
+        `App Data: media ${formatBytes(item.meta?.mediaBytes || 0)}, config ${formatBytes(item.meta?.configBytes || 0)}, cache ${formatBytes(item.meta?.cacheBytes || 0)}`,
+        `CMS: ${item.meta?.server || "-"}`,
+        `Last App State: ${item.appState || "-"}`,
+        `Last Config Sync: ${formatStatusTime(item.meta?.lastConfigSyncAt)}`,
+        `Last Media Sync: ${formatStatusTime(item.meta?.lastMediaSyncAt)}`,
+      ];
+      const playback = item.meta?.currentPlaybackBySection || {};
+      Object.keys(playback)
+        .sort((a, b) => Number(a) - Number(b))
+        .forEach((sectionKey) => {
+          const section = playback[sectionKey] || {};
+          const pageText = Number(section.page || 0) > 0 ? ` (page ${section.page})` : "";
+          lines.push(
+            `Section ${sectionKey}: ${section.title || "-"}${pageText} [${section.sourceType || "-"}${section.mediaType ? `/${section.mediaType}` : ""}]`
+          );
+        });
+      if (item.lastDisconnectAt) {
+        lines.push(`Disconnected: ${formatStatusTime(item.lastDisconnectAt)} (${item.lastDisconnectReason || "unknown"})`);
+      }
+      if (item.lastError) {
+        lines.push(`Last Error: ${item.lastError}`);
+      }
+      detailsEl.textContent = lines.join("\n");
+    }
+  }
+  renderDeviceDashboardList(list);
+}
+
+function renderDeviceDashboardList(statusList) {
+  const box = document.getElementById("deviceDashboardList");
+  if (!box) return;
+  const list = Array.isArray(statusList) ? statusList : [];
+  const selectedDevice = document.getElementById("deviceSelect")?.value || "all";
+  const searchValue = String(document.getElementById("deviceDashboardSearch")?.value || "")
+    .trim()
+    .toLowerCase();
+  const filtered = !searchValue
+    ? list
+    : list.filter((item) => {
+        const haystack = [
+          item.deviceId,
+          item.appState,
+          item.lastError,
+          item.meta?.appVersion,
+          item.online ? "online" : "offline",
+        ]
+          .map((value) => String(value || "").toLowerCase())
+          .join(" ");
+        return haystack.includes(searchValue);
+      });
+
+  if (!filtered.length) {
+    box.innerHTML = `<div class="alerts-empty">No device health data available.</div>`;
+    return;
+  }
+
+  box.innerHTML = filtered
+    .map((item) => {
+      const isSelected = selectedDevice === item.deviceId;
+      const stateText = item.online ? "Online" : item.lastError ? "Error" : "Offline";
+      const freeBytes = Number(item.meta?.freeBytes || 0);
+      const totalBytes = Number(item.meta?.totalBytes || 0);
+      const storageRatio = totalBytes > 0 ? freeBytes / totalBytes : 1;
+      const lowStorage = totalBytes > 0 && storageRatio < 0.12;
+      const summaryLines = [
+        `Version: ${item.meta?.appVersion || "-"}`,
+        `Last Seen: ${formatStatusTime(item.lastSeen)}`,
+        `Storage: ${formatMetaStorage(item.meta?.freeBytes || 0, item.meta?.totalBytes || 0)}`,
+        `Media: ${formatBytes(item.meta?.mediaBytes || 0)}`,
+        `Cache: ${formatBytes(item.meta?.cacheBytes || 0)}`,
+        `State: ${item.appState || "-"}`,
+        `Config Sync: ${formatStatusTime(item.meta?.lastConfigSyncAt)}`,
+        `Media Sync: ${formatStatusTime(item.meta?.lastMediaSyncAt)}`,
+      ];
+      const playback = item.meta?.currentPlaybackBySection || {};
+      const firstPlaybackKey = Object.keys(playback)
+        .sort((a, b) => Number(a) - Number(b))[0];
+      if (firstPlaybackKey) {
+        const playing = playback[firstPlaybackKey] || {};
+        summaryLines.push(`Playing: S${firstPlaybackKey} ${playing.title || "-"}`);
+      }
+      if (item.lastError) {
+        summaryLines.push(`Error: ${item.lastError}`);
+      }
+      return `
+        <button
+          type="button"
+          class="dashboard-card ${isSelected ? "is-selected" : ""} ${lowStorage ? "is-warning" : ""}"
+          onclick="selectDeviceFromDashboard('${String(item.deviceId).replace(/'/g, "\\'")}')"
+        >
+          <div class="dashboard-card-head">
+            <div class="dashboard-card-title">${item.deviceId}</div>
+            <div class="alert-state ${item.online ? "online" : item.lastError ? "error" : "offline"}">${stateText}</div>
+          </div>
+          <div class="dashboard-card-meta">${summaryLines.join("\n")}</div>
+        </button>
+      `;
+    })
+    .join("");
+}
+
+function toggleDeviceDashboard(forceValue) {
+  const overlay = document.getElementById("deviceDashboardOverlay");
+  if (!overlay) return;
+  isDeviceDashboardOpen =
+    typeof forceValue === "boolean" ? forceValue : !isDeviceDashboardOpen;
+  overlay.classList.toggle("hidden", !isDeviceDashboardOpen);
+  if (isDeviceDashboardOpen) {
+    renderHealthSummary(latestDeviceStatusList);
+  }
+}
+
+function selectDeviceFromDashboard(deviceId) {
+  const select = document.getElementById("deviceSelect");
+  if (!select) return;
+  select.value = deviceId;
+  loadConfig();
+  renderHealthSummary(latestDeviceStatusList);
+  renderDeviceAlerts(latestDeviceStatusList);
+}
+
 function renderDeviceAlerts(statusList) {
   const box = document.getElementById("deviceAlertsList");
   if (!box) return;
@@ -813,6 +1219,24 @@ function renderDeviceAlerts(statusList) {
       if (item.lastError) {
         details.push(`Error: ${item.lastError}`);
       }
+      if (item.meta?.appVersion) {
+        details.push(`App Version: ${item.meta.appVersion}`);
+      }
+      if (item.meta && (item.meta.totalBytes || item.meta.freeBytes)) {
+        details.push(
+          `Storage: ${formatMetaStorage(item.meta.freeBytes, item.meta.totalBytes)}`
+        );
+      }
+      if (item.meta) {
+        details.push(
+          `App Data: media ${formatBytes(item.meta.mediaBytes || 0)}, config ${formatBytes(
+            item.meta.configBytes || 0
+          )}, cache ${formatBytes(item.meta.cacheBytes || 0)}`
+        );
+      }
+      if (item.meta?.server) {
+        details.push(`CMS: ${item.meta.server}`);
+      }
 
       return `
         <div class="alert-item ${cardClass}">
@@ -831,12 +1255,17 @@ async function loadDeviceAlerts() {
   try {
     const res = await fetch(`/device-status?ts=${Date.now()}`);
     const list = await res.json();
-    renderDeviceAlerts(Array.isArray(list) ? list : []);
+    latestDeviceStatusList = Array.isArray(list) ? list : [];
+    window.__latestDeviceStatusList = latestDeviceStatusList;
+    renderHealthSummary(latestDeviceStatusList);
+    renderDeviceAlerts(latestDeviceStatusList);
   } catch (_e) {
     const box = document.getElementById("deviceAlertsList");
     if (box) {
       box.innerHTML = `<div class="alerts-empty">Unable to load device alerts.</div>`;
     }
+    window.__latestDeviceStatusList = [];
+    renderHealthSummary([]);
   }
 }
 
@@ -914,7 +1343,7 @@ function renderUploadSections() {
             type="file"
             id="media${i}"
             multiple
-            accept=".mp4,.mkv,.webm,.jpg,.jpeg,.png,.txt,.pdf,video/mp4,video/webm,image/jpeg,image/png,text/plain,application/pdf"
+            accept=".mp4,.m4v,.mov,.mkv,.webm,.jpg,.jpeg,.png,.txt,.pdf,video/mp4,video/quicktime,video/webm,image/jpeg,image/png,text/plain,application/pdf"
           />
           <button class="btn primary" onclick="uploadMedia(${i})">Upload Section ${i}</button>
         </div>
@@ -959,7 +1388,7 @@ async function loadDevices() {
 async function uploadMedia(section) {
   const sourceType = document.getElementById(`sourceType${section}`)?.value || SECTION_SOURCE_TYPES.multimedia;
   if (sourceType !== SECTION_SOURCE_TYPES.multimedia) {
-    alert("For Website/YouTube source, upload is not required. Save settings only.");
+    showNotice("info", "Upload Not Required", "For Website/YouTube source, upload is not required. Save settings only.");
     return;
   }
 
@@ -968,14 +1397,16 @@ async function uploadMedia(section) {
   const files = input?.files;
 
   const { errors, warnings, validFiles, totalSize } = validateUploadFiles(files);
+  const selectedHasVideo = validFiles.some((f) => VIDEO_FILE_EXT.test(f.name || ""));
 
   if (errors.length) {
-    alert(errors.join("\n"));
+    showNotice("error", "Upload Validation Failed", errors.join("\n"), 7000);
     return;
   }
 
   if (warnings.length) {
-    const proceed = confirm(
+    const proceed = await showConfirmDialog(
+      "Large Upload Warning",
       `${warnings.join("\n")}\n\nTotal upload size: ${formatBytes(
         totalSize
       )}\n\nContinue upload?`
@@ -988,11 +1419,24 @@ async function uploadMedia(section) {
     updateUploadProgress(0, "Preparing upload...");
 
     const deviceId = document.getElementById("deviceSelect").value;
+    if (selectedHasVideo) {
+      const allowed = await canUploadVideosToSection(deviceId, section);
+      if (!allowed) {
+        showNotice(
+          "warning",
+          "Video Upload Restricted",
+          "Video upload allowed in only one grid section. Remove video from other section first.",
+          6500
+        );
+        return;
+      }
+    }
+
     let uploadFiles = [...validFiles];
 
     const pdfFiles = uploadFiles.filter((f) => /\.pdf$/i.test(f.name || ""));
     if (pdfFiles.length) {
-      updateUploadProgress(0, "Converting PDF pages to images...");
+      updateUploadProgress(0, "Converting PDF pages to image slides...");
       const nonPdf = uploadFiles.filter((f) => !/\.pdf$/i.test(f.name || ""));
       const convertedPdfImages = [];
       for (const pdfFile of pdfFiles) {
@@ -1019,10 +1463,17 @@ async function uploadMedia(section) {
       updateUploadProgress(percent, "Uploading media...");
     });
 
+    await loadPreviewMedia(deviceId);
+    renderScreenPreview();
+
     updateUploadProgress(100, "Upload complete");
-    alert("Upload Success");
+    showNotice("success", "Upload Complete", "Media uploaded successfully.");
   } catch (err) {
-    alert(`Upload Failed: ${err.message || "Unknown error"}`);
+    const rawMessage = String(err?.message || "Unknown error");
+    const message = /pdf engine/i.test(rawMessage)
+      ? `${rawMessage}\n\nPDF uploads require conversion on the CMS page before sending to devices.`
+      : rawMessage;
+    showNotice("error", "Upload Failed", message, 7000);
   } finally {
     loader.classList.add("hidden");
     updateUploadProgress(0, "Preparing upload...");
@@ -1081,13 +1532,24 @@ async function saveConfig() {
   const targetDevice = document.getElementById("deviceSelect").value;
 
   currentConfig = config;
-  await fetch("/config", {
+  const res = await fetch("/config", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ targetDevice, config }),
   });
 
-  alert("Saved Successfully");
+  if (!res.ok) {
+    let msg = `Save failed (HTTP ${res.status})`;
+    try {
+      const data = await res.json();
+      if (data?.error) msg = data.error;
+    } catch (_e) {
+    }
+    showNotice("error", "Save Failed", msg, 6500);
+    return;
+  }
+
+  showNotice("success", "Settings Saved", "Configuration has been applied successfully.");
 
   if (window.ReactNativeWebView) {
     window.ReactNativeWebView.postMessage("CONFIG_SAVED");
@@ -1103,7 +1565,7 @@ async function clearDeviceData() {
       ? "Are you sure? This will clear app data on ALL connected devices."
       : "Are you sure? This will clear app data.";
 
-  if (!confirm(confirmMsg)) return;
+  if (!(await showConfirmDialog("Clear Device Data", confirmMsg, "Yes, Clear", "Cancel"))) return;
 
   await fetch("/config/clear-device", {
     method: "POST",
@@ -1111,7 +1573,29 @@ async function clearDeviceData() {
     body: JSON.stringify({ targetDevice: deviceId }),
   });
 
-  alert("Clear command sent");
+  showNotice("success", "Command Sent", "Clear data command has been sent.");
+}
+
+async function clearDeviceCache() {
+  const deviceId = document.getElementById("deviceSelect").value;
+  const confirmMsg =
+    deviceId === "all"
+      ? "Clear cache on ALL connected devices?"
+      : `Clear cache on device ${deviceId}?`;
+
+  if (!(await showConfirmDialog("Clear Device Cache", confirmMsg, "Yes, Clear", "Cancel"))) return;
+
+  const res = await fetch("/config/clear-cache", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ targetDevice: deviceId }),
+  });
+  const data = await res.json();
+  if (data?.success) {
+    showNotice("success", "Command Sent", "Clear cache command has been sent.");
+  } else {
+    showNotice("error", "Command Failed", "Device not connected.");
+  }
 }
 
 async function restartDeviceApp() {
@@ -1121,7 +1605,7 @@ async function restartDeviceApp() {
       ? "Restart app on ALL connected devices?"
       : `Restart app on device ${deviceId}?`;
 
-  if (!confirm(confirmMsg)) return;
+  if (!(await showConfirmDialog("Restart App", confirmMsg, "Yes, Restart", "Cancel"))) return;
 
   const res = await fetch("/config/restart-device", {
     method: "POST",
@@ -1131,9 +1615,9 @@ async function restartDeviceApp() {
 
   const data = await res.json();
   if (data?.success) {
-    alert("Restart command sent");
+    showNotice("success", "Command Sent", "Restart command has been sent.");
   } else {
-    alert("Restart failed: device not connected");
+    showNotice("error", "Restart Failed", "Device not connected.");
   }
 }
 
@@ -1145,7 +1629,7 @@ async function setAutoReopen(enabled) {
       ? `Apply "${label} auto reopen" on ALL connected devices?`
       : `Apply "${label} auto reopen" on device ${deviceId}?`;
 
-  if (!confirm(confirmMsg)) return;
+  if (!(await showConfirmDialog("Auto Reopen", confirmMsg, "Apply", "Cancel"))) return;
 
   const res = await fetch("/config/auto-reopen", {
     method: "POST",
@@ -1155,11 +1639,91 @@ async function setAutoReopen(enabled) {
 
   const data = await res.json();
   if (data?.success) {
-    alert(`Auto reopen ${enabled ? "enabled" : "disabled"} command sent`);
+    showNotice(
+      "success",
+      "Command Sent",
+      `Auto reopen ${enabled ? "enabled" : "disabled"} command sent.`
+    );
   } else {
-    alert("Command failed: device not connected");
+    showNotice("error", "Command Failed", "Device not connected.");
   }
 }
+
+async function uploadAndInstallAppUpdate() {
+  const fileInput = document.getElementById("appUpdateFile");
+  const deviceId = document.getElementById("deviceSelect").value;
+  const file = fileInput?.files?.[0];
+  if (!file) {
+    showNotice("warning", "APK Required", "Select an APK file first.");
+    return;
+  }
+
+  const confirmed = await showConfirmDialog(
+    "Update App",
+    `Upload and install ${file.name} on ${deviceId === "all" ? "all connected devices" : `device ${deviceId}`}?`,
+    "Upload And Update",
+    "Cancel"
+  );
+  if (!confirmed) return;
+
+  const loader = document.getElementById("uploadLoader");
+  try {
+    loader.classList.remove("hidden");
+    updateUploadProgress(0, "Uploading APK update...");
+    const formData = new FormData();
+    formData.append("file", file);
+    const endpointCheck = await fetch("/config?ts=" + Date.now());
+    if (!endpointCheck.ok) {
+      throw new Error("CMS config API not reachable. Please restart CMS.");
+    }
+
+    const responseText = await uploadWithProgress("/config/upload-app-update", formData, (percent) => {
+      updateUploadProgress(percent, "Uploading APK update...");
+    });
+    const uploaded = JSON.parse(String(responseText || "{}"));
+    const apkUrl = uploaded?.apkUrl;
+    if (!apkUrl) {
+      throw new Error("APK upload response invalid");
+    }
+
+    updateUploadProgress(100, "Sending install command...");
+    const installRes = await fetch("/config/install-app-update", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ targetDevice: deviceId, apkUrl }),
+    });
+    const installData = await installRes.json();
+    if (!installData?.success) {
+      throw new Error("Install command failed. Device may be offline.");
+    }
+
+    showNotice(
+      "success",
+      "Update Sent",
+      "APK uploaded and install command sent. On some TVs, manual install confirmation may still be required.",
+      7000
+    );
+  } catch (err) {
+    const rawMessage = String(err?.message || "Unknown error");
+    const message =
+      /endpoint not found|api endpoint not found|cannot post/i.test(rawMessage)
+        ? "This CMS server is running an older build that does not support APK update yet. Restart or rebuild the CMS server, then try again."
+        : rawMessage;
+    showNotice("error", "App Update Failed", message, 7000);
+  } finally {
+    loader.classList.add("hidden");
+    updateUploadProgress(0, "Preparing upload...");
+  }
+}
+
+// Ensure inline onclick handlers in index.html always resolve these actions.
+window.clearDeviceData = clearDeviceData;
+window.clearDeviceCache = clearDeviceCache;
+window.restartDeviceApp = restartDeviceApp;
+window.setAutoReopen = setAutoReopen;
+window.uploadAndInstallAppUpdate = uploadAndInstallAppUpdate;
+window.toggleDeviceDashboard = toggleDeviceDashboard;
+window.selectDeviceFromDashboard = selectDeviceFromDashboard;
 
 document.addEventListener("DOMContentLoaded", () => {
   renderGrid3LayoutOptions();
@@ -1181,6 +1745,7 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("deviceSelect").addEventListener("change", () => {
     loadConfig();
     loadDeviceAlerts();
+    renderHealthSummary(latestDeviceStatusList);
   });
   document.getElementById("gridRatio").addEventListener("change", (e) => {
     selectedGridRatio = e.target.value;

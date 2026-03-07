@@ -4,25 +4,66 @@ import {
   Dimensions,
   Easing,
   NativeModules,
+  Pressable,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from "react-native";
 import Immersive from "react-native-immersive";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import RNFS from "react-native-fs";
 import { io, Socket } from "socket.io-client";
 import AdminButton from "../admin/AdminButton";
 import AdminPanel from "../admin/AdminPanel";
 import PlayerScreen from "../player/PlayerScreen";
 import { loadConfig } from "../services/configService";
+import {
+  activateDeviceWithKey,
+  hasLocalActivationForDevice,
+  readStoredLicense,
+} from "../services/licenseService";
 import { syncMedia } from "../services/mediaService";
-import { findCMS } from "../services/serverService";
+import { findCMS, getServer, restoreServerFromStorage } from "../services/serverService";
 
 let socket: Socket | null = null;
-const SOCKET_RECOVERY_TIMEOUT_MS = 65000;
 const WATCHDOG_INTERVAL_MS = 5000;
-const WATCHDOG_STALL_MS = 20000;
+const WATCHDOG_STALL_MS = 180000;
+const NETWORK_RECOVERY_INTERVAL_MS = 10000;
+const SELF_HEAL_SYNC_INTERVAL_MS = 120000;
+const RECONNECT_RETRY_INTERVAL_MS = 10000;
+const AUTO_CLEAR_BOOT_MARKER_KEY = "auto_clear_boot_marker_v1";
+const AUTO_CLEAR_BOOT_LOOP_GUARD_MS = 20000;
+const ENABLE_AUTO_CLEAR_ON_BOOT = false;
+const INIT_RETRY_DELAY_MS = 5000;
+const MEDIA_UPDATE_DEBOUNCE_MS = 800;
+const LICENSE_INIT_RETRY_COUNT = 5;
+const LICENSE_INIT_RETRY_DELAY_MS = 1200;
+
+function wait(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function getPathSizeSafe(targetPath: string) {
+  try {
+    const exists = await RNFS.exists(targetPath);
+    if (!exists) return 0;
+    const stat = await RNFS.stat(targetPath);
+    if (!stat.isDirectory()) {
+      return Number(stat.size || 0);
+    }
+    const entries = await RNFS.readDir(targetPath);
+    const sizes = await Promise.all(
+      entries.map((entry) => getPathSizeSafe(entry.path))
+    );
+    return sizes.reduce((sum, size) => sum + Number(size || 0), 0);
+  } catch {
+    return 0;
+  }
+}
 
 export default function App() {
+  const [bootReady, setBootReady] = useState(false);
   const [showAdmin, setShowAdmin] = useState(false);
   const [ready, setReady] = useState(false);
   const [config, setConfig] = useState<any>(null);
@@ -36,8 +77,116 @@ export default function App() {
   const spinValue = useRef(new Animated.Value(0)).current;
   const pulseValue = useRef(new Animated.Value(0)).current;
   const deviceIdRef = useRef("unknown");
+  const [licenseReady, setLicenseReady] = useState(false);
+  const [licensed, setLicensed] = useState(false);
+  const [licenseDeviceId, setLicenseDeviceId] = useState("");
+  const [licenseInput, setLicenseInput] = useState("");
+  const [licenseStatus, setLicenseStatus] = useState("Checking activation...");
+  const [licenseBusy, setLicenseBusy] = useState(false);
+  const [uploadProcessingBySection, setUploadProcessingBySection] = useState<
+    Record<number, string>
+  >({});
+  const playbackBySectionRef = useRef<Record<number, any>>({});
+  const lastConfigSyncAtRef = useRef("");
+  const lastMediaSyncAtRef = useRef("");
+
+  async function clearRuntimePlaybackData() {
+    // Intentionally do not clear AsyncStorage license keys.
+    const mediaPath = `${RNFS.DocumentDirectoryPath}/media`;
+    const configPath = `${RNFS.DocumentDirectoryPath}/config.json`;
+    if (await RNFS.exists(mediaPath)) {
+      await RNFS.unlink(mediaPath);
+    }
+    if (await RNFS.exists(configPath)) {
+      await RNFS.unlink(configPath);
+    }
+  }
+
+  async function clearRuntimeCacheOnly() {
+    const mediaPath = `${RNFS.DocumentDirectoryPath}/media`;
+    const cachePath = RNFS.CachesDirectoryPath;
+    if (await RNFS.exists(mediaPath)) {
+      await RNFS.unlink(mediaPath);
+    }
+    if (cachePath && (await RNFS.exists(cachePath))) {
+      const entries = await RNFS.readDir(cachePath);
+      await Promise.allSettled(entries.map((entry) => RNFS.unlink(entry.path)));
+    }
+  }
 
   useEffect(() => {
+    let mounted = true;
+    if (!ENABLE_AUTO_CLEAR_ON_BOOT) {
+      setBootReady(true);
+      return () => {
+        mounted = false;
+      };
+    }
+
+    const triggerAppReload = () => {
+      try {
+        const rn = require("react-native");
+        if (rn?.NativeModules?.DeviceIdModule?.restartApp) {
+          rn.NativeModules.DeviceIdModule.restartApp();
+          return true;
+        }
+        if (rn?.NativeModules?.RNRestart?.Restart) {
+          rn.NativeModules.RNRestart.Restart();
+          return true;
+        }
+        if (rn?.DevSettings?.reload) {
+          rn.DevSettings.reload();
+          return true;
+        }
+      } catch (_e) {
+      }
+      return false;
+    };
+
+    const autoClearOnBoot = async () => {
+      try {
+        const markerRaw = await AsyncStorage.getItem(AUTO_CLEAR_BOOT_MARKER_KEY);
+        const markerTs = Number(markerRaw || 0);
+        const recentMarker =
+          Number.isFinite(markerTs) &&
+          markerTs > 0 &&
+          Date.now() - markerTs < AUTO_CLEAR_BOOT_LOOP_GUARD_MS;
+
+        if (recentMarker) {
+          await AsyncStorage.removeItem(AUTO_CLEAR_BOOT_MARKER_KEY);
+          if (mounted) setBootReady(true);
+          return;
+        }
+
+        await AsyncStorage.setItem(
+          AUTO_CLEAR_BOOT_MARKER_KEY,
+          String(Date.now())
+        );
+
+        await clearRuntimePlaybackData();
+
+        const reloaded = triggerAppReload();
+        if (!reloaded) {
+          await AsyncStorage.removeItem(AUTO_CLEAR_BOOT_MARKER_KEY);
+          if (mounted) setBootReady(true);
+        }
+      } catch (_e) {
+        try {
+          await AsyncStorage.removeItem(AUTO_CLEAR_BOOT_MARKER_KEY);
+        } catch {
+        }
+        if (mounted) setBootReady(true);
+      }
+    };
+
+    autoClearOnBoot();
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!bootReady) return;
     const spinLoop = Animated.loop(
       Animated.timing(spinValue, {
         toValue: 1,
@@ -71,13 +220,89 @@ export default function App() {
       spinLoop.stop();
       pulseLoop.stop();
     };
-  }, [pulseValue, spinValue]);
+  }, [bootReady, pulseValue, spinValue]);
 
   useEffect(() => {
+    if (!bootReady) return;
+    let mounted = true;
+    const initLicense = async () => {
+      try {
+        const nativeDeviceModule = (NativeModules as any)?.DeviceIdModule;
+        const deviceId = String(nativeDeviceModule?.getDeviceId?.() || "").trim();
+        deviceIdRef.current = deviceId || "unknown";
+        if (!mounted) return;
+        setLicenseDeviceId(deviceId || "unknown");
+        let storedLicense = { deviceId: "", licenseKey: "" };
+        let active = false;
+
+        for (let attempt = 0; attempt < LICENSE_INIT_RETRY_COUNT; attempt += 1) {
+          storedLicense = await readStoredLicense();
+          if (!mounted) return;
+
+          if (storedLicense.licenseKey) {
+            setLicenseInput(storedLicense.licenseKey);
+          }
+
+          active = deviceId ? await hasLocalActivationForDevice(deviceId) : false;
+          if (active) break;
+
+          const hasStoredKeyForDevice =
+            storedLicense.deviceId === deviceId && !!storedLicense.licenseKey;
+          if (hasStoredKeyForDevice) {
+            active = true;
+            break;
+          }
+
+          if (attempt < LICENSE_INIT_RETRY_COUNT - 1) {
+            await wait(LICENSE_INIT_RETRY_DELAY_MS);
+          }
+        }
+
+        if (!mounted) return;
+        setLicensed(!!active);
+        setLicenseStatus(
+          active
+            ? "Device activated. Starting player..."
+            : "License required. Enter key to activate."
+        );
+      } catch (_e) {
+        if (!mounted) return;
+        setLicensed(false);
+        setLicenseStatus("Unable to read device id.");
+      } finally {
+        if (mounted) setLicenseReady(true);
+      }
+    };
+    initLicense();
+    return () => {
+      mounted = false;
+    };
+  }, [bootReady]);
+
+  const onActivateLicense = async () => {
+    if (licenseBusy) return;
+    setLicenseBusy(true);
+    const result = await activateDeviceWithKey(licenseDeviceId, licenseInput);
+    setLicenseBusy(false);
+    setLicenseStatus(result.message);
+    if (result.success) {
+      setLicenseInput(String(licenseInput || "").trim().toUpperCase());
+      setLicensed(true);
+      setReady(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!bootReady || !licenseReady || !licensed) return;
     let isMounted = true;
-    let disconnectTimer: ReturnType<typeof setTimeout> | null = null;
     let watchdogTimer: ReturnType<typeof setInterval> | null = null;
     let healthTimer: ReturnType<typeof setInterval> | null = null;
+    let networkRecoveryTimer: ReturnType<typeof setInterval> | null = null;
+    let selfHealTimer: ReturnType<typeof setInterval> | null = null;
+    let reconnectTimer: ReturnType<typeof setInterval> | null = null;
+    let initRetryTimer: ReturnType<typeof setTimeout> | null = null;
+    let mediaUpdateTimer: ReturnType<typeof setTimeout> | null = null;
+    let initInProgress = false;
     let lastWatchdogTick = Date.now();
     const setConnectTexts = (subtitle: string, status: string) => {
       if (!isMounted) return;
@@ -96,6 +321,10 @@ export default function App() {
       console.log("Restarting app:", reason);
       try {
         const rn = require("react-native");
+        if (rn?.NativeModules?.DeviceIdModule?.restartApp) {
+          rn.NativeModules.DeviceIdModule.restartApp();
+          return;
+        }
         if (rn?.NativeModules?.RNRestart?.Restart) {
           rn.NativeModules.RNRestart.Restart();
           return;
@@ -109,19 +338,13 @@ export default function App() {
       }
     };
 
-    const startDisconnectRecovery = (reason: string) => {
-      if (disconnectTimer) return;
-      console.log("Socket disconnected, recovery timer started:", reason);
-      disconnectTimer = setTimeout(() => {
-        disconnectTimer = null;
-        safeRestartApp(`socket timeout: ${reason}`);
-      }, SOCKET_RECOVERY_TIMEOUT_MS);
+    const startDisconnectRecovery = (_reason: string) => {
+      // Offline-first mode: do not auto-restart app on CMS disconnect.
+      // Player should continue using cached config/media.
     };
 
     const clearDisconnectRecovery = () => {
-      if (!disconnectTimer) return;
-      clearTimeout(disconnectTimer);
-      disconnectTimer = null;
+      // no-op in offline-first mode
     };
 
     const startWatchdog = () => {
@@ -143,6 +366,99 @@ export default function App() {
       watchdogTimer = null;
     };
 
+    const checkAndRecoverNetwork = () => {
+      try {
+        const nativeDeviceModule = (NativeModules as any)?.DeviceIdModule;
+        if (!nativeDeviceModule?.getNetworkState) return;
+
+        const networkState = nativeDeviceModule.getNetworkState() || {};
+        const hasInternet = !!networkState?.internet;
+        if (hasInternet) return;
+
+        setConnectTexts(
+          "Internet OFF detected. Trying auto WiFi recovery",
+          "Recovering network..."
+        );
+
+        if (nativeDeviceModule?.tryRecoverInternet) {
+          const recovery = nativeDeviceModule.tryRecoverInternet();
+          emitDeviceHealth("network-recovery", { networkState, recovery });
+        } else {
+          emitDeviceHealth("network-recovery", { networkState, recovery: null });
+        }
+      } catch (e) {
+        console.log("Network recovery check failed", e);
+      }
+    };
+
+    const startNetworkRecoveryLoop = () => {
+      if (networkRecoveryTimer) return;
+      checkAndRecoverNetwork();
+      networkRecoveryTimer = setInterval(() => {
+        checkAndRecoverNetwork();
+      }, NETWORK_RECOVERY_INTERVAL_MS);
+    };
+
+    const stopNetworkRecoveryLoop = () => {
+      if (!networkRecoveryTimer) return;
+      clearInterval(networkRecoveryTimer);
+      networkRecoveryTimer = null;
+    };
+
+    const startSelfHealSyncLoop = () => {
+      if (selfHealTimer) return;
+      selfHealTimer = setInterval(async () => {
+        if (!socket?.connected) return;
+        try {
+          const configLoaded = await loadConfig(setConfig);
+          if (!configLoaded) {
+            emitDeviceError("self-heal-config", "Config refresh failed");
+            return;
+          }
+          await syncMedia();
+          emitDeviceHealth("self-heal-sync");
+        } catch (e) {
+          emitDeviceError("self-heal-sync", String((e as any)?.message || e));
+        }
+      }, SELF_HEAL_SYNC_INTERVAL_MS);
+    };
+
+    const stopSelfHealSyncLoop = () => {
+      if (!selfHealTimer) return;
+      clearInterval(selfHealTimer);
+      selfHealTimer = null;
+    };
+
+    const startReconnectLoop = () => {
+      if (reconnectTimer) return;
+      reconnectTimer = setInterval(async () => {
+        if (!isMounted || initInProgress) return;
+        if (socket?.connected) return;
+        try {
+          if (socket && !socket.connected) {
+            socket.connect();
+            return;
+          }
+        } catch {
+        }
+        await init();
+      }, RECONNECT_RETRY_INTERVAL_MS);
+    };
+
+    const stopReconnectLoop = () => {
+      if (!reconnectTimer) return;
+      clearInterval(reconnectTimer);
+      reconnectTimer = null;
+    };
+
+    const scheduleInitRetry = () => {
+      if (initRetryTimer) return;
+      initRetryTimer = setTimeout(() => {
+        initRetryTimer = null;
+        if (isMounted) init();
+      }, INIT_RETRY_DELAY_MS);
+    };
+
     const emitDeviceHealth = (appState: string, meta: any = null) => {
       if (!socket?.connected) return;
       socket.emit("device-health", {
@@ -161,23 +477,58 @@ export default function App() {
       });
     };
 
-    const onClearData = async () => {
-      console.log("Clear data command received");
-      const RNFS = require("react-native-fs");
+    const collectDeviceMeta = async (extra: Record<string, any> = {}) => {
+      const nativeDeviceModule = (NativeModules as any)?.DeviceIdModule;
+      let storageStats = { freeBytes: 0, totalBytes: 0 };
+      let appVersion = "";
 
       try {
-        const mediaPath = `${RNFS.DocumentDirectoryPath}/media`;
-        if (await RNFS.exists(mediaPath)) {
-          await RNFS.unlink(mediaPath);
+        if (nativeDeviceModule?.getStorageStats) {
+          storageStats = nativeDeviceModule.getStorageStats() || storageStats;
         }
+      } catch {
+      }
 
-        const configPath = `${RNFS.DocumentDirectoryPath}/config.json`;
-        if (await RNFS.exists(configPath)) {
-          await RNFS.unlink(configPath);
+      try {
+        if (nativeDeviceModule?.getAppVersion) {
+          appVersion = String(nativeDeviceModule.getAppVersion() || "");
         }
+      } catch {
+      }
+
+      const mediaBytes = await getPathSizeSafe(`${RNFS.DocumentDirectoryPath}/media`);
+      const configBytes = await getPathSizeSafe(`${RNFS.DocumentDirectoryPath}/config.json`);
+      const cacheBytes = await getPathSizeSafe(RNFS.CachesDirectoryPath);
+
+      return {
+        appVersion,
+        licensed,
+        server: getServer(),
+        currentPlaybackBySection: playbackBySectionRef.current,
+        lastConfigSyncAt: lastConfigSyncAtRef.current,
+        lastMediaSyncAt: lastMediaSyncAtRef.current,
+        mediaBytes,
+        configBytes,
+        cacheBytes,
+        freeBytes: Number(storageStats?.freeBytes || 0),
+        totalBytes: Number(storageStats?.totalBytes || 0),
+        ...extra,
+      };
+    };
+
+    const emitDeviceHealthSnapshot = async (appState: string, extra: Record<string, any> = {}) => {
+      const meta = await collectDeviceMeta(extra);
+      emitDeviceHealth(appState, meta);
+    };
+
+    const onClearData = async () => {
+      console.log("Clear data command received");
+
+      try {
+        await clearRuntimePlaybackData();
 
         console.log("Data cleared");
-        emitDeviceHealth("clear-data");
+        await emitDeviceHealthSnapshot("clear-data");
         const { DevSettings } = require("react-native");
         DevSettings.reload();
       } catch (e) {
@@ -186,20 +537,43 @@ export default function App() {
       }
     };
 
-    const init = async () => {
+    const onClearCache = async () => {
       try {
+        await clearRuntimeCacheOnly();
+        await emitDeviceHealthSnapshot("clear-cache");
+        await syncMedia({ force: true });
+        if (isMounted) {
+          setMediaVersion((prev) => prev + 1);
+        }
+      } catch (e) {
+        emitDeviceError("clear-cache", `Clear cache failed: ${String((e as any)?.message || e)}`);
+      }
+    };
+
+    const init = async () => {
+      if (initInProgress) return;
+      initInProgress = true;
+      try {
+        await restoreServerFromStorage();
+        checkAndRecoverNetwork();
         setConnectTexts("Scanning local network for CMS server", "Network scan running");
         const url = await findCMS();
         if (!url) {
-          console.log("No CMS found");
-          setConnectTexts(
-            "CMS not found. Retrying discovery automatically",
-            "Retrying in 5 seconds"
-          );
-          setTimeout(() => {
-            if (isMounted) init();
-          }, 5000);
-          if (isMounted) setReady(false);
+          console.log("No CMS found – using cached content if available");
+          checkAndRecoverNetwork();
+          await restoreServerFromStorage();
+          const cachedConfig = await loadConfig(setConfig);
+          await syncMedia();
+          if (isMounted) {
+            setConnectTexts(
+              cachedConfig
+                ? "CMS offline. Playing cached content"
+                : "CMS not found. Playing cached content",
+              "Offline playback"
+            );
+            setReady(true);
+          }
+          scheduleInitRetry();
           return;
         }
 
@@ -220,44 +594,118 @@ export default function App() {
 
         socket.on("connect", async () => {
           console.log("Connected:", deviceId);
+          stopReconnectLoop();
           clearDisconnectRecovery();
           socket?.emit("register-device", deviceId);
-          emitDeviceHealth("connected", { phase: "socket-connected" });
+          await emitDeviceHealthSnapshot("connected", { phase: "socket-connected" });
           setConnectTexts("Connected. Downloading device configuration", "Syncing config");
 
-          await loadConfig(setConfig);
+          const loadedConfig = await loadConfig(setConfig);
+          if (!loadedConfig) {
+            emitDeviceError("config", "Config unavailable from server and local cache");
+            setConnectTexts("Config unavailable. Retrying automatically", "Config retry");
+            if (socket) {
+              socket.disconnect();
+              socket = null;
+            }
+            if (isMounted) setReady(false);
+            scheduleInitRetry();
+            return;
+          }
+          lastConfigSyncAtRef.current = new Date().toISOString();
           emitDeviceHealth("syncing-config");
           setConnectTexts("Configuration received. Syncing media catalog", "Syncing media");
-          await syncMedia();
-          emitDeviceHealth("syncing-media");
+          await syncMedia({ force: true });
+          lastMediaSyncAtRef.current = new Date().toISOString();
+          await emitDeviceHealthSnapshot("syncing-media");
           setConnectTexts("Setup complete. Starting player", "Ready");
 
           if (healthTimer) clearInterval(healthTimer);
-          healthTimer = setInterval(() => {
-            emitDeviceHealth("ready", { ready: true });
+          healthTimer = setInterval(async () => {
+            await emitDeviceHealthSnapshot("ready", { ready: true });
           }, 15000);
 
           if (isMounted) setReady(true);
         });
 
-        // Only media change should restart slideshow/media index.
-        socket.on("media-updated", async () => {
-          await syncMedia();
-          await loadConfig(setConfig);
-          emitDeviceHealth("media-updated");
-          if (isMounted) {
-            setMediaVersion((prev) => prev + 1);
-          }
+        // Media update: refresh slideshow immediately, then sync/cache in background.
+        socket.on("media-updated", () => {
+          emitDeviceHealth("media-updated-received");
+          if (mediaUpdateTimer) clearTimeout(mediaUpdateTimer);
+          mediaUpdateTimer = setTimeout(async () => {
+            mediaUpdateTimer = null;
+            try {
+              await syncMedia({ force: true });
+              lastMediaSyncAtRef.current = new Date().toISOString();
+            } finally {
+              if (isMounted) {
+                setMediaVersion((prev) => prev + 1);
+              }
+              emitDeviceHealth("media-updated-synced");
+            }
+          }, MEDIA_UPDATE_DEBOUNCE_MS);
         });
 
         // Config-only update should apply settings without restarting media playback.
         socket.on("config-updated", async () => {
-          await loadConfig(setConfig);
-          emitDeviceHealth("config-updated");
+          const loadedConfig = await loadConfig(setConfig);
+          if (loadedConfig) {
+            lastConfigSyncAtRef.current = new Date().toISOString();
+            emitDeviceHealth("config-updated");
+          } else {
+            emitDeviceError("config-updated", "Config refresh failed");
+          }
+        });
+
+        socket.on("section-upload-status", (payload) => {
+          const section = Number(payload?.section || 0);
+          if (!section || section < 1 || section > 3) return;
+
+          const status = String(payload?.status || "").toLowerCase();
+          const message = String(payload?.message || "").trim();
+
+          if (status === "processing") {
+            setUploadProcessingBySection((prev) => ({
+              ...prev,
+              [section]: message || "Uploading... Please wait.",
+            }));
+            return;
+          }
+
+          if (status === "ready") {
+            setUploadProcessingBySection((prev) => {
+              const next = { ...prev };
+              delete next[section];
+              return next;
+            });
+            return;
+          }
+
+          if (status === "error") {
+            setUploadProcessingBySection((prev) => ({
+              ...prev,
+              [section]: message || "Upload failed. Please try again.",
+            }));
+            return;
+          }
         });
 
         socket.on("clear-data", onClearData);
+        socket.on("clear-cache", onClearCache);
         socket.on("restart-app", () => safeRestartApp("manual restart command"));
+        socket.on("install-app-update", async (payload) => {
+          try {
+            const nativeDeviceModule = (NativeModules as any)?.DeviceIdModule;
+            const apkUrl = String(payload?.apkUrl || "").trim();
+            if (!apkUrl || !nativeDeviceModule?.installApkUpdate) {
+              throw new Error("APK update not available");
+            }
+            await emitDeviceHealthSnapshot("install-app-update", { apkUrl });
+            nativeDeviceModule.installApkUpdate(apkUrl);
+          } catch (e) {
+            emitDeviceError("install-app-update", String((e as any)?.message || e));
+          }
+        });
         socket.on("set-auto-reopen", (payload) => {
           try {
             const enabled = !!payload?.enabled;
@@ -272,16 +720,19 @@ export default function App() {
         });
         socket.on("disconnect", (reason) => {
           setConnectTexts(
-            `Connection lost (${String(reason)}). Trying to recover`,
-            "Reconnecting..."
+            `Connection lost (${String(reason)}). Continuing cached playback`,
+            "Offline mode"
           );
+          startReconnectLoop();
           startDisconnectRecovery(`disconnect:${String(reason)}`);
         });
         socket.on("connect_error", (err) => {
+          checkAndRecoverNetwork();
           setConnectTexts(
-            "Socket handshake failed. Retrying automatically",
-            "Connect error"
+            "Socket unavailable. Continuing cached playback",
+            "Offline mode"
           );
+          startReconnectLoop();
           emitDeviceError("connect-error", err?.message || "unknown");
           startDisconnectRecovery(`connect_error:${err?.message || "unknown"}`);
         });
@@ -296,17 +747,33 @@ export default function App() {
         }
         setConnectTexts("Startup failed unexpectedly", "Recovery mode");
         if (isMounted) setReady(false);
+      } finally {
+        initInProgress = false;
       }
     };
 
     init();
     (Immersive as any).on();
     startWatchdog();
+    startNetworkRecoveryLoop();
+    startSelfHealSyncLoop();
+    startReconnectLoop();
 
     return () => {
       isMounted = false;
       clearDisconnectRecovery();
       stopWatchdog();
+      stopNetworkRecoveryLoop();
+      stopSelfHealSyncLoop();
+      stopReconnectLoop();
+      if (initRetryTimer) {
+        clearTimeout(initRetryTimer);
+        initRetryTimer = null;
+      }
+      if (mediaUpdateTimer) {
+        clearTimeout(mediaUpdateTimer);
+        mediaUpdateTimer = null;
+      }
       if (healthTimer) {
         clearInterval(healthTimer);
         healthTimer = null;
@@ -316,14 +783,90 @@ export default function App() {
         socket.off("media-updated");
         socket.off("config-updated");
         socket.off("clear-data", onClearData);
+        socket.off("clear-cache", onClearCache);
         socket.off("restart-app");
+        socket.off("install-app-update");
         socket.off("set-auto-reopen");
+        socket.off("section-upload-status");
         socket.off("disconnect");
         socket.off("connect_error");
         socket.disconnect();
       }
     };
-  }, []);
+  }, [bootReady, licenseReady, licensed]);
+
+  if (!bootReady) {
+    return (
+      <View style={styles.connectRoot}>
+        <View style={styles.bgGlowTop} />
+        <View style={styles.bgGlowBottom} />
+        <View style={styles.connectCard}>
+          <Text style={styles.connectTitle}>Preparing Device</Text>
+          <Text style={styles.connectSubtitle}>Clearing local data and restarting player...</Text>
+        </View>
+      </View>
+    );
+  }
+
+  if (!licenseReady) {
+    return (
+      <View style={styles.connectRoot}>
+        <View style={styles.bgGlowTop} />
+        <View style={styles.bgGlowBottom} />
+        <View style={styles.connectCard}>
+          <Text style={styles.connectTitle}>Checking License</Text>
+          <Text style={styles.connectSubtitle}>Preparing device activation state...</Text>
+        </View>
+      </View>
+    );
+  }
+
+  if (!licensed) {
+    return (
+      <View style={styles.connectRoot}>
+        <View style={styles.bgGlowTop} />
+        <View style={styles.bgGlowBottom} />
+        <View style={styles.licenseCard}>
+          <Text style={styles.connectTitle}>Activate Device</Text>
+          <Text style={styles.licenseHint}>Share Device ID and enter license key provided by admin.</Text>
+
+          <View style={styles.licenseRow}>
+            <Text style={styles.licenseLabel}>Device ID</Text>
+            <Text selectable style={styles.licenseValue}>{licenseDeviceId || "unknown"}</Text>
+          </View>
+
+          <View style={styles.licenseRow}>
+            <Text style={styles.licenseLabel}>License Key</Text>
+            <TextInput
+              value={licenseInput}
+              onChangeText={setLicenseInput}
+              autoCapitalize="characters"
+              autoCorrect={false}
+              placeholder="Enter key"
+              placeholderTextColor="rgba(210,220,232,0.45)"
+              style={styles.licenseInput}
+            />
+          </View>
+
+          <Pressable
+            onPress={onActivateLicense}
+            disabled={licenseBusy}
+            style={({ pressed }) => [
+              styles.licenseBtn,
+              pressed && !licenseBusy ? { opacity: 0.85 } : null,
+              licenseBusy ? { opacity: 0.55 } : null,
+            ]}
+          >
+            <Text style={styles.licenseBtnText}>
+              {licenseBusy ? "Verifying..." : "Save And Activate"}
+            </Text>
+          </Pressable>
+
+          <Text style={styles.licenseStatus}>{licenseStatus}</Text>
+        </View>
+      </View>
+    );
+  }
 
   if (!ready) {
     const ringSpin = spinValue.interpolate({
@@ -376,6 +919,21 @@ export default function App() {
     bgColor: "#000",
   };
 
+  const handlePlaybackChange = (payload: any) => {
+    const section = Number(payload?.section || 0);
+    if (!section) return;
+    playbackBySectionRef.current = {
+      ...playbackBySectionRef.current,
+      [section]: {
+        title: String(payload?.title || ""),
+        sourceType: String(payload?.sourceType || ""),
+        mediaType: String(payload?.mediaType || ""),
+        page: Number(payload?.page || 0),
+        updatedAt: new Date().toISOString(),
+      },
+    };
+  };
+
   const { width, height } = Dimensions.get("window");
   const orientation = safeConfig.orientation;
 
@@ -411,7 +969,12 @@ export default function App() {
           transform: [{ rotate: rotation }],
         }}
       >
-        <PlayerScreen config={safeConfig} mediaVersion={mediaVersion} />
+        <PlayerScreen
+          config={safeConfig}
+          mediaVersion={mediaVersion}
+          uploadProcessingBySection={uploadProcessingBySection}
+          onPlaybackChange={handlePlaybackChange}
+        />
         <AdminButton onOpen={() => setShowAdmin(true)} />
         <AdminPanel visible={showAdmin} onClose={() => setShowAdmin(false)} />
       </View>
@@ -519,5 +1082,68 @@ const styles = StyleSheet.create({
     color: "#c8fff1",
     fontSize: 13,
     fontWeight: "600",
+  },
+  licenseCard: {
+    width: "86%",
+    maxWidth: 620,
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.14)",
+    backgroundColor: "rgba(16, 20, 27, 0.93)",
+    paddingHorizontal: 24,
+    paddingVertical: 24,
+  },
+  licenseHint: {
+    marginTop: 8,
+    marginBottom: 14,
+    color: "rgba(216, 225, 236, 0.8)",
+    fontSize: 14,
+    lineHeight: 20,
+  },
+  licenseRow: {
+    marginTop: 10,
+  },
+  licenseLabel: {
+    color: "#dff2ff",
+    fontSize: 13,
+    fontWeight: "700",
+    marginBottom: 6,
+  },
+  licenseValue: {
+    color: "#9de6d5",
+    fontSize: 14,
+    backgroundColor: "rgba(22,30,40,0.75)",
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  licenseInput: {
+    color: "#f2fbff",
+    fontSize: 15,
+    borderWidth: 1,
+    borderColor: "rgba(124, 190, 231, 0.45)",
+    borderRadius: 10,
+    backgroundColor: "rgba(14, 19, 27, 0.86)",
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    letterSpacing: 0.4,
+  },
+  licenseBtn: {
+    marginTop: 18,
+    backgroundColor: "#1d8fff",
+    borderRadius: 12,
+    paddingVertical: 12,
+    alignItems: "center",
+  },
+  licenseBtnText: {
+    color: "#ffffff",
+    fontSize: 15,
+    fontWeight: "700",
+  },
+  licenseStatus: {
+    marginTop: 12,
+    color: "rgba(206, 229, 245, 0.86)",
+    fontSize: 13,
+    lineHeight: 18,
   },
 });
