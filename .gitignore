@@ -75,11 +75,7 @@ yarn-error.log
 !.yarn/versions
 
 
-# APK / AAB
-*.apk
-*.aab
-
-# Env files (CMS URL etc)
+# Environment files
 .env
 .env.*
 
@@ -87,44 +83,22 @@ yarn-error.log
 *.log
 logs/
 
-# RN cache
+# React Native / Expo cache
 .expo/
 .expo-shared/
 
-# executables
+# Generated binaries and installers
 *.exe
-
-# installer output
-server/installer/output/
-
-# uploads
-server/uploads/
-
-# vscode
-.vscode/
-
-# Android build
 *.apk
 *.aab
+server/installer/output/
+
+# Runtime uploads
+server/uploads/
 
 # Android build folders
 android/app/build/
 android/build/
 
-# executables
-*.exe
-*.apk
-*.aab
-
-# installers
-server/installer/output/
-
-# uploads
-server/uploads/
-
-# build folders
-android/app/build/
-android/build/
-
-# vscode
+# VS Code
 .vscode/
