@@ -39,6 +39,8 @@ const INIT_RETRY_DELAY_MS = 5000;
 const MEDIA_UPDATE_DEBOUNCE_MS = 800;
 const LICENSE_INIT_RETRY_COUNT = 5;
 const LICENSE_INIT_RETRY_DELAY_MS = 1200;
+const APK_UPDATE_PENDING_KEY = "apk_update_pending_v1";
+const APK_UPDATE_PENDING_MAX_AGE_MS = 1000 * 60 * 60;
 
 function wait(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -89,6 +91,7 @@ export default function App() {
   const playbackBySectionRef = useRef<Record<number, any>>({});
   const lastConfigSyncAtRef = useRef("");
   const lastMediaSyncAtRef = useRef("");
+  const pendingApkUpdateSuccessRef = useRef<any | null>(null);
 
   async function clearRuntimePlaybackData() {
     // Intentionally do not clear AsyncStorage license keys.
@@ -274,6 +277,51 @@ export default function App() {
       }
     };
     initLicense();
+    return () => {
+      mounted = false;
+    };
+  }, [bootReady]);
+
+  useEffect(() => {
+    if (!bootReady) return;
+    let mounted = true;
+
+    const inspectPendingApkUpdate = async () => {
+      try {
+        const raw = await AsyncStorage.getItem(APK_UPDATE_PENDING_KEY);
+        if (!raw || !mounted) return;
+        const pending = JSON.parse(String(raw || "{}"));
+        const requestedAt = Number(pending?.requestedAt || 0);
+        const previousVersion = String(pending?.previousVersion || "").trim();
+        const apkUrl = String(pending?.apkUrl || "").trim();
+
+        if (
+          !requestedAt ||
+          Date.now() - requestedAt > APK_UPDATE_PENDING_MAX_AGE_MS
+        ) {
+          await AsyncStorage.removeItem(APK_UPDATE_PENDING_KEY);
+          return;
+        }
+
+        const nativeDeviceModule = (NativeModules as any)?.DeviceIdModule;
+        const currentVersion = String(nativeDeviceModule?.getAppVersion?.() || "").trim();
+        if (!currentVersion || !previousVersion || currentVersion === previousVersion) {
+          return;
+        }
+
+        pendingApkUpdateSuccessRef.current = {
+          apkUrl,
+          previousVersion,
+          currentVersion,
+          requestedAt,
+          reportedAt: new Date().toISOString(),
+        };
+        await AsyncStorage.removeItem(APK_UPDATE_PENDING_KEY);
+      } catch (_e) {
+      }
+    };
+
+    inspectPendingApkUpdate();
     return () => {
       mounted = false;
     };
@@ -625,6 +673,16 @@ export default function App() {
             await emitDeviceHealthSnapshot("ready", { ready: true });
           }, 15000);
 
+          if (pendingApkUpdateSuccessRef.current) {
+            await emitDeviceHealthSnapshot("apk-update-success", {
+              apkUpdate: {
+                status: "success",
+                ...pendingApkUpdateSuccessRef.current,
+              },
+            });
+            pendingApkUpdateSuccessRef.current = null;
+          }
+
           if (isMounted) setReady(true);
         });
 
@@ -700,7 +758,23 @@ export default function App() {
             if (!apkUrl || !nativeDeviceModule?.installApkUpdate) {
               throw new Error("APK update not available");
             }
-            await emitDeviceHealthSnapshot("install-app-update", { apkUrl });
+            const previousVersion = String(nativeDeviceModule?.getAppVersion?.() || "").trim();
+            await AsyncStorage.setItem(
+              APK_UPDATE_PENDING_KEY,
+              JSON.stringify({
+                apkUrl,
+                previousVersion,
+                requestedAt: Date.now(),
+              })
+            );
+            await emitDeviceHealthSnapshot("install-app-update", {
+              apkUrl,
+              apkUpdate: {
+                status: "installing",
+                previousVersion,
+                requestedAt: new Date().toISOString(),
+              },
+            });
             nativeDeviceModule.installApkUpdate(apkUrl);
           } catch (e) {
             emitDeviceError("install-app-update", String((e as any)?.message || e));

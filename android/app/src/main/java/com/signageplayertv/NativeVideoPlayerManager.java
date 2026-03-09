@@ -46,6 +46,11 @@ public class NativeVideoPlayerManager extends SimpleViewManager<NativeVideoPlaye
         view.setResizeMode(resizeMode);
     }
 
+    @ReactProp(name = "rotation", defaultFloat = 0f)
+    public void setRotation(NativeVideoPlayerView view, float rotation) {
+        view.setVideoRotation(rotation);
+    }
+
     @Nullable
     @Override
     public Map<String, Object> getExportedCustomDirectEventTypeConstants() {

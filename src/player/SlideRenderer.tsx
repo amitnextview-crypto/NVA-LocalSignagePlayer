@@ -140,7 +140,6 @@ export default function SlideRenderer({
       : ViewType.SURFACE
   );
   const [textContent, setTextContent] = useState("");
-  const [boxSize, setBoxSize] = useState({ width: 0, height: 0 });
   const [pdfSlotUrls, setPdfSlotUrls] = useState<{ a: string; b: string }>({ a: "", b: "" });
   const [pdfSlotLoaded, setPdfSlotLoaded] = useState<{ a: boolean; b: boolean }>({ a: false, b: false });
   const [pdfVisibleSlot, setPdfVisibleSlot] = useState<"a" | "b">("a");
@@ -168,27 +167,7 @@ export default function SlideRenderer({
   const sourceType = sectionConfig?.sourceType || SOURCE_TYPES.multimedia;
   const sourceUrl = sectionConfig?.sourceUrl || "";
   const isMultiPaneLayout = config?.layout === "grid2" || config?.layout === "grid3";
-  const manualRotation = 0;
-  const mediaRotation = ((manualRotation % 360) + 360) % 360;
-  const isQuarterTurn = mediaRotation === 90 || mediaRotation === 270;
-  const mediaRotateLayerStyle = (() => {
-    if (!mediaRotation) return styles.fillLayer;
-    if (!isQuarterTurn || !boxSize.width || !boxSize.height) {
-      return [styles.fillLayer, { transform: [{ rotate: `${mediaRotation}deg` }] }];
-    }
-    const rotatedWidth = boxSize.height;
-    const rotatedHeight = boxSize.width;
-    return [
-      styles.absoluteLayer,
-      {
-        width: rotatedWidth,
-        height: rotatedHeight,
-        left: (boxSize.width - rotatedWidth) / 2,
-        top: (boxSize.height - rotatedHeight) / 2,
-        transform: [{ rotate: `${mediaRotation}deg` }],
-      },
-    ];
-  })();
+  const mediaRotateLayerStyle = styles.fillLayer;
 
   useEffect(() => {
     filesRef.current = files;
@@ -656,15 +635,6 @@ export default function SlideRenderer({
             ],
           },
         ]}
-        onLayout={(e) => {
-          const { width, height } = e.nativeEvent.layout || {};
-          if (!width || !height) return;
-          setBoxSize((prev) =>
-            prev.width === width && prev.height === height
-              ? prev
-              : { width, height }
-          );
-        }}
       >
         <View style={mediaRotateLayerStyle}>
           <WebView
@@ -730,9 +700,10 @@ export default function SlideRenderer({
       ) : isVideo ? (
         <View style={mediaRotateLayerStyle}>
           <NativeVideoPlayer
-            key={`${file.name}-${index}-${mediaRotation}-${videoReloadToken}-${String(videoViewType)}`}
+            key={`${file.name}-${index}-${videoReloadToken}-${String(videoViewType)}`}
             src={uri}
             style={styles.media}
+            rotation={0}
             muted
             resizeMode="stretch"
             repeat={files.length === 1}

@@ -2,6 +2,7 @@ package com.signageplayertv;
 
 import android.content.Context;
 import android.net.Uri;
+import android.view.LayoutInflater;
 import android.view.ViewGroup;
 import android.widget.FrameLayout;
 
@@ -12,7 +13,6 @@ import com.facebook.react.bridge.LifecycleEventListener;
 import com.facebook.react.bridge.ReactContext;
 import com.facebook.react.bridge.WritableMap;
 import com.facebook.react.uimanager.events.RCTEventEmitter;
-import com.google.android.exoplayer2.C;
 import com.google.android.exoplayer2.DefaultLoadControl;
 import com.google.android.exoplayer2.ExoPlayer;
 import com.google.android.exoplayer2.MediaItem;
@@ -31,19 +31,20 @@ public class NativeVideoPlayerView extends FrameLayout implements LifecycleEvent
     private boolean muted = true;
     private boolean repeat = false;
     private String resizeMode = "stretch";
+    private float rotation = 0f;
     private boolean attached = false;
 
     public NativeVideoPlayerView(@NonNull Context context, @NonNull ReactContext reactContext) {
         super(context);
         this.reactContext = reactContext;
-        this.playerView = new StyledPlayerView(context);
-        this.playerView.setUseController(false);
+        LayoutInflater.from(context).inflate(R.layout.native_video_player_view, this, true);
+        this.playerView = findViewById(R.id.native_video_player_surface);
         this.playerView.setLayoutParams(new LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.MATCH_PARENT
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            ViewGroup.LayoutParams.MATCH_PARENT
         ));
-        addView(this.playerView);
         applyResizeMode();
+        applyRotation();
         reactContext.addLifecycleEventListener(this);
     }
 
@@ -71,6 +72,11 @@ public class NativeVideoPlayerView extends FrameLayout implements LifecycleEvent
     public void setResizeMode(String value) {
         this.resizeMode = value == null ? "stretch" : value;
         applyResizeMode();
+    }
+
+    public void setVideoRotation(float value) {
+        this.rotation = value;
+        applyRotation();
     }
 
     private void ensurePlayer() {
@@ -134,6 +140,10 @@ public class NativeVideoPlayerView extends FrameLayout implements LifecycleEvent
             mode = AspectRatioFrameLayout.RESIZE_MODE_FIT;
         }
         playerView.setResizeMode(mode);
+    }
+
+    private void applyRotation() {
+        playerView.setRotation(rotation);
     }
 
     private void dispatchEvent(String eventName, WritableMap payload) {

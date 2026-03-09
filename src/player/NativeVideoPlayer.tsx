@@ -11,6 +11,7 @@ type NativeVideoErrorEvent = NativeSyntheticEvent<{ message?: string }>;
 type Props = {
   src: string;
   style?: StyleProp<ViewStyle>;
+  rotation?: number;
   muted?: boolean;
   repeat?: boolean;
   resizeMode?: "stretch" | "cover" | "contain";

@@ -6,13 +6,6 @@ import Ticker from "./Ticker";
 
 const GRID_GAP = 1;
 
-function getOrientationRotation(orientation: string) {
-  if (orientation === "vertical") return "90deg";
-  if (orientation === "reverse-vertical") return "-90deg";
-  if (orientation === "reverse-horizontal") return "180deg";
-  return "0deg";
-}
-
 function parseRatio(value: any, count: number): number[] {
   const parts = String(value || "")
     .split(":")
@@ -61,8 +54,6 @@ export default function PlayerScreen({ config, mediaVersion, uploadProcessingByS
     : 0;
   const grid3Layout = config?.grid3Layout || "stack-v";
   const gridRatio = config?.gridRatio || "1:1:1";
-  const mediaRotation = getOrientationRotation(config?.orientation || "horizontal");
-
   useEffect(() => {
     const evalSchedule = () => setScheduleOn(isScheduleActive(config?.schedule));
     evalSchedule();
@@ -274,10 +265,7 @@ export default function PlayerScreen({ config, mediaVersion, uploadProcessingByS
           <View style={{ flex: 1, backgroundColor: fallbackBgColor }}>
             <Video
               source={{ uri: fallbackMediaUrl }}
-              style={[
-                { width: "100%", height: "100%" },
-                mediaRotation !== "0deg" ? { transform: [{ rotate: mediaRotation }] } : null,
-              ]}
+              style={{ width: "100%", height: "100%" }}
               resizeMode="cover"
               repeat
               muted

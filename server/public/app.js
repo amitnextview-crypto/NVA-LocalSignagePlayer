@@ -30,6 +30,7 @@ let alertsPollTimer = null;
 let selectedGridRatio = "1:1:1";
 let latestDeviceStatusList = [];
 let isDeviceDashboardOpen = false;
+const seenApkUpdateSuccessNotices = new Set();
 
 function removeActiveMessageDialogs() {
   document.querySelectorAll(".message-overlay").forEach((el) => el.remove());
@@ -1237,6 +1238,11 @@ function renderDeviceAlerts(statusList) {
       if (item.meta?.server) {
         details.push(`CMS: ${item.meta.server}`);
       }
+      if (item.meta?.apkUpdate?.status === "success") {
+        const previousVersion = item.meta?.apkUpdate?.previousVersion || "-";
+        const currentVersion = item.meta?.apkUpdate?.currentVersion || item.meta?.appVersion || "-";
+        details.push(`APK Updated: ${previousVersion} -> ${currentVersion}`);
+      }
 
       return `
         <div class="alert-item ${cardClass}">
@@ -1251,12 +1257,44 @@ function renderDeviceAlerts(statusList) {
     .join("");
 }
 
+function showApkUpdateSuccessNotices(statusList) {
+  const list = Array.isArray(statusList) ? statusList : [];
+  list.forEach((item) => {
+    if (item?.appState !== "apk-update-success") return;
+    if (item?.meta?.apkUpdate?.status !== "success") return;
+
+    const previousVersion = String(item?.meta?.apkUpdate?.previousVersion || "").trim();
+    const currentVersion = String(
+      item?.meta?.apkUpdate?.currentVersion || item?.meta?.appVersion || ""
+    ).trim();
+    const reportedAt = String(item?.meta?.apkUpdate?.reportedAt || item?.lastSeen || "").trim();
+    const noticeKey = `${String(item?.deviceId || "")}|${currentVersion}|${reportedAt}`;
+    if (!noticeKey || seenApkUpdateSuccessNotices.has(noticeKey)) return;
+    seenApkUpdateSuccessNotices.add(noticeKey);
+
+    const versionText =
+      previousVersion && currentVersion
+        ? `from version ${previousVersion} to ${currentVersion}`
+        : currentVersion
+        ? `to version ${currentVersion}`
+        : "successfully";
+
+    showNotice(
+      "success",
+      "APK Updated",
+      `Device ${item.deviceId} has been updated ${versionText}.`,
+      7000
+    );
+  });
+}
+
 async function loadDeviceAlerts() {
   try {
     const res = await fetch(`/device-status?ts=${Date.now()}`);
     const list = await res.json();
     latestDeviceStatusList = Array.isArray(list) ? list : [];
     window.__latestDeviceStatusList = latestDeviceStatusList;
+    showApkUpdateSuccessNotices(latestDeviceStatusList);
     renderHealthSummary(latestDeviceStatusList);
     renderDeviceAlerts(latestDeviceStatusList);
   } catch (_e) {
