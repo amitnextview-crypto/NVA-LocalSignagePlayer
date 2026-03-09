@@ -303,16 +303,17 @@ export default function SlideRenderer({
     const streamThresholdBytes = 300 * 1024 * 1024; // Prefer HTTP streaming for videos > 300MB to avoid OOM
     const isVideo = isVideoFile(file);
     const isLargeVideo = isVideo && fileSize > streamThresholdBytes;
-    if (isVideo && server && file?.url) {
-      // Prefer direct HTTP for video playback on Android TV. Cached file playback has
-      // been less reliable than streamed playback on some devices.
-      setUri(buildRemoteMediaUri(server, file.url, file?.mtimeMs || mediaVersion));
+    const localPlayableUri = normalizeMediaUri(String(file?.remoteUrl || ""));
+    const hasLocalPlayableUri = /^file:\/\//i.test(localPlayableUri);
+
+    if (hasLocalPlayableUri) {
+      setUri(localPlayableUri);
     } else if (isLargeVideo && server && file?.url) {
       setUri(buildRemoteMediaUri(server, file.url, file?.mtimeMs || mediaVersion));
-    } else if (file.remoteUrl) {
-      setUri(normalizeMediaUri(file.remoteUrl));
     } else if (server && file?.url) {
       setUri(buildRemoteMediaUri(server, file.url, file?.mtimeMs || mediaVersion));
+    } else if (file.remoteUrl) {
+      setUri(localPlayableUri);
     } else {
       setUri("");
     }

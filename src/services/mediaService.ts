@@ -9,7 +9,6 @@ const MEDIA_ROOT = `${MEDIA_DIR}/files`;
 const MANIFEST_PATH = `${MEDIA_DIR}/manifest.json`;
 const LIST_CACHE_PATH = `${MEDIA_DIR}/list-cache.json`;
 const MEDIA_FETCH_TIMEOUT_MS = 2500;
-const MAX_CACHEABLE_NON_VIDEO_BYTES = 80 * 1024 * 1024; // 80 MB
 const DOWNLOAD_CONCURRENCY = 1;
 const LIST_REFRESH_MIN_INTERVAL_MS = 2000;
 
@@ -162,19 +161,10 @@ function localPathFor(remoteUrl: string, section: number, name: string): string 
   return `${MEDIA_ROOT}/${fileName}`;
 }
 
-function isVideoItem(item: MediaItem): boolean {
-  const fileName = String(item.originalName || item.name || "").toLowerCase();
-  return /\.(mp4|mkv|webm)$/i.test(fileName);
-}
-
 function shouldCacheItem(item: MediaItem): boolean {
-  const size = Number(item.size || 0);
-  if (isVideoItem(item)) {
-    // Videos always stream from CMS so React Native never manages huge local video files.
-    return false;
-  }
-  if (!size || size <= 0) return true;
-  return size <= MAX_CACHEABLE_NON_VIDEO_BYTES;
+  // Offline playback requires every uploaded asset to be available locally.
+  // Keep caching unconditional so the last synced content still plays when CMS is offline.
+  return !!String(item?.url || "").trim();
 }
 
 function getDownloadKey(item: MediaItem): string {
