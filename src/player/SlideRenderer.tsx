@@ -3,7 +3,7 @@ import { Animated, Easing, Image, ScrollView, StyleSheet, Text, View } from "rea
 import { ViewType } from "react-native-video";
 import { WebView } from "react-native-webview";
 import RNFS from "react-native-fs";
-import { getMediaFiles } from "../services/mediaService";
+import { getMediaFiles, getCacheProgress, subscribeCacheProgress } from "../services/mediaService";
 import { getServer } from "../services/serverService";
 import NativeVideoPlayer from "./NativeVideoPlayer";
 
@@ -47,17 +47,18 @@ function normalizeYoutubeEmbedUrl(url: string) {
   return `https://www.youtube.com/watch?v=${id}&autoplay=1&mute=1&playsinline=1`;
 }
 
-function buildPdfViewerUrl(fileUrl: string, page: number) {
+function buildPdfViewerUrl(fileUrl: string, page: number, nonce?: string | number) {
   const safePage = Math.max(1, Number(page || 1));
   if (/^file:\/\//i.test(String(fileUrl || ""))) {
     return String(fileUrl || "");
   }
   const match = String(fileUrl || "").match(/^(https?:\/\/[^/]+)/i);
   const origin = match?.[1] || "";
+  const stamp = nonce ? `&r=${encodeURIComponent(String(nonce))}` : "";
   if (origin) {
-    return `${origin}/pdf-viewer.html?file=${encodeURIComponent(fileUrl)}&page=${safePage}`;
+    return `${origin}/pdf-viewer.html?file=${encodeURIComponent(fileUrl)}&page=${safePage}${stamp}`;
   }
-  return `/pdf-viewer.html?file=${encodeURIComponent(fileUrl)}&page=${safePage}`;
+  return `/pdf-viewer.html?file=${encodeURIComponent(fileUrl)}&page=${safePage}${stamp}`;
 }
 
 function normalizeMediaUri(value: string) {
@@ -102,6 +103,17 @@ function getMediaIdentity(item: any) {
   ].join("|");
 }
 
+function getMediaContentIdentity(item: any) {
+  return [
+    String(item?.url || ""),
+    String(item?.originalName || item?.name || ""),
+    String(item?.type || ""),
+    Number(item?.mtimeMs || 0),
+    Number(item?.size || 0),
+    Number(item?.page || 0),
+  ].join("|");
+}
+
 function areMediaListsEqual(a: any[], b: any[]) {
   if (a === b) return true;
   if (!Array.isArray(a) || !Array.isArray(b)) return false;
@@ -129,6 +141,7 @@ export default function SlideRenderer({
   mediaVersion,
   processingMessage,
   onPlaybackChange,
+  onPlaybackError,
 }: any) {
   const [files, setFiles] = useState<any[]>([]);
   const [index, setIndex] = useState(0);
@@ -143,6 +156,9 @@ export default function SlideRenderer({
   const [pdfSlotUrls, setPdfSlotUrls] = useState<{ a: string; b: string }>({ a: "", b: "" });
   const [pdfSlotLoaded, setPdfSlotLoaded] = useState<{ a: boolean; b: boolean }>({ a: false, b: false });
   const [pdfVisibleSlot, setPdfVisibleSlot] = useState<"a" | "b">("a");
+  const [pdfReloadToken, setPdfReloadToken] = useState(0);
+  const [cacheProgress, setCacheProgress] = useState(0);
+  const [forceLocalRestart, setForceLocalRestart] = useState(false);
   const server = getServer();
 
   const translateX = useRef(new Animated.Value(0)).current;
@@ -150,18 +166,24 @@ export default function SlideRenderer({
   const scale = useRef(new Animated.Value(0.95)).current;
   const opacity = useRef(new Animated.Value(1)).current;
   const rotateY = useRef(new Animated.Value(0)).current;
+  const livePulse = useRef(new Animated.Value(1)).current;
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const filesRef = useRef<any[]>([]);
   const indexRef = useRef(0);
+  const pinnedMediaUriRef = useRef<{ identity: string; uri: string } | null>(null);
+  const pinnedContentIdentityRef = useRef<string>("");
   const pdfSlotUrlsRef = useRef({ a: "", b: "" });
   const isMountedRef = useRef(true);
   const emptyFetchCountRef = useRef(0);
   const videoRetryCountRef = useRef(0);
   const pdfPendingSlotRef = useRef<"a" | "b" | null>(null);
   const pdfPendingUrlRef = useRef("");
+  const pdfRetryCountRef = useRef(0);
+  const pendingLocalSwitchRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const EMPTY_FETCH_CLEAR_THRESHOLD = 3;
   const MAX_SINGLE_VIDEO_RETRY = 3;
+  const MAX_PDF_RETRY = 3;
 
   const sectionConfig = config?.sections?.[sectionIndex] || {};
   const sourceType = sectionConfig?.sourceType || SOURCE_TYPES.multimedia;
@@ -172,6 +194,7 @@ export default function SlideRenderer({
   useEffect(() => {
     filesRef.current = files;
     indexRef.current = index;
+    setForceLocalRestart(false);
   }, [files, index]);
 
   useEffect(() => {
@@ -182,8 +205,32 @@ export default function SlideRenderer({
     return () => {
       isMountedRef.current = false;
       if (retryTimerRef.current) clearTimeout(retryTimerRef.current);
+      if (pendingLocalSwitchRef.current) clearTimeout(pendingLocalSwitchRef.current);
     };
   }, []);
+
+  useEffect(() => {
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(livePulse, {
+          toValue: 0.2,
+          duration: 700,
+          easing: Easing.inOut(Easing.quad),
+          useNativeDriver: true,
+        }),
+        Animated.timing(livePulse, {
+          toValue: 1,
+          duration: 700,
+          easing: Easing.inOut(Easing.quad),
+          useNativeDriver: true,
+        }),
+      ])
+    );
+    loop.start();
+    return () => {
+      loop.stop();
+    };
+  }, [livePulse]);
 
   const scheduleRetryLoad = () => {
     if (retryTimerRef.current) clearTimeout(retryTimerRef.current);
@@ -244,9 +291,40 @@ export default function SlideRenderer({
     }
 
     videoRetryCountRef.current = 0;
+    if (typeof onPlaybackError === "function") {
+      onPlaybackError({
+        section: sectionIndex + 1,
+        name: activeFile?.name || activeFile?.originalName || "",
+        mediaType: activeFile?.type || "",
+        uri,
+        viewType: String(videoViewType),
+        message: "Media could not be played",
+      });
+    }
     if (files.length > 1) {
       goNext();
       return;
+    }
+    scheduleRetryLoad();
+  };
+
+  const handlePdfError = () => {
+    if (pdfRetryCountRef.current < MAX_PDF_RETRY) {
+      pdfRetryCountRef.current += 1;
+      setTimeout(() => {
+        if (!isMountedRef.current) return;
+        setPdfReloadToken((prev) => prev + 1);
+      }, 1200 * pdfRetryCountRef.current);
+      return;
+    }
+
+    if (typeof onPlaybackError === "function") {
+      onPlaybackError({
+        section: sectionIndex + 1,
+        name: files[index]?.name || files[index]?.originalName || "",
+        mediaType: "pdf",
+        message: "PDF could not be displayed",
+      });
     }
     scheduleRetryLoad();
   };
@@ -293,12 +371,38 @@ export default function SlideRenderer({
 
   useEffect(() => {
     if (sourceType !== SOURCE_TYPES.multimedia) return;
+    if (!isMountedRef.current) return;
+    let timer: ReturnType<typeof setInterval> | null = null;
+
+    const refresh = async () => {
+      try {
+        const list = await getMediaFiles(sectionIndex);
+        if (!isMountedRef.current) return;
+        if (Array.isArray(list) && list.length) {
+          setFiles((prev) => (areMediaListsEqual(prev, list) ? prev : list));
+          setIndex(findMatchingIndex(list, filesRef.current[indexRef.current], indexRef.current));
+        }
+      } catch (_e) {
+        // ignore
+      }
+    };
+
+    timer = setInterval(refresh, 5000);
+    return () => {
+      if (timer) clearInterval(timer);
+    };
+  }, [sectionIndex, sourceType]);
+
+  useEffect(() => {
+    if (sourceType !== SOURCE_TYPES.multimedia) return;
     if (!files.length) return;
     videoRetryCountRef.current = 0;
     setVideoReloadToken(0);
     setVideoViewType(isMultiPaneLayout ? ViewType.TEXTURE : ViewType.SURFACE);
 
     const file = files[index];
+    const identity = getMediaIdentity(file);
+    const contentIdentity = getMediaContentIdentity(file);
     const fileSize = Number(file?.size || 0);
     const streamThresholdBytes = 300 * 1024 * 1024; // Prefer HTTP streaming for videos > 300MB to avoid OOM
     const isVideo = isVideoFile(file);
@@ -306,18 +410,107 @@ export default function SlideRenderer({
     const localPlayableUri = normalizeMediaUri(String(file?.remoteUrl || ""));
     const hasLocalPlayableUri = /^file:\/\//i.test(localPlayableUri);
 
+    let nextUri = "";
     if (hasLocalPlayableUri) {
-      setUri(localPlayableUri);
+      nextUri = localPlayableUri;
     } else if (isLargeVideo && server && file?.url) {
-      setUri(buildRemoteMediaUri(server, file.url, file?.mtimeMs || mediaVersion));
+      nextUri = buildRemoteMediaUri(server, file.url, file?.mtimeMs || mediaVersion);
     } else if (server && file?.url) {
-      setUri(buildRemoteMediaUri(server, file.url, file?.mtimeMs || mediaVersion));
+      nextUri = buildRemoteMediaUri(server, file.url, file?.mtimeMs || mediaVersion);
     } else if (file.remoteUrl) {
-      setUri(localPlayableUri);
-    } else {
-      setUri("");
+      nextUri = localPlayableUri;
     }
+
+    const pinned = pinnedMediaUriRef.current;
+    if (
+      isVideo &&
+      pinned &&
+      pinned.identity === identity &&
+      /^https?:\/\//i.test(pinned.uri) &&
+      /^file:\/\//i.test(nextUri)
+    ) {
+      // Avoid switching from remote to local mid-playback (causes pause on some TVs).
+      nextUri = pinned.uri;
+    } else {
+      pinnedMediaUriRef.current = nextUri ? { identity, uri: nextUri } : null;
+    }
+
+    // Avoid swapping the current media source mid-playback when only cache state changes.
+    if (
+      indexRef.current === index &&
+      pinnedContentIdentityRef.current === contentIdentity &&
+      uri &&
+      nextUri &&
+      nextUri !== uri &&
+      server
+    ) {
+      return;
+    }
+
+    pinnedContentIdentityRef.current = contentIdentity;
+    setUri(nextUri || "");
   }, [files, index, server, sourceType, mediaVersion]);
+
+  useEffect(() => {
+    if (sourceType !== SOURCE_TYPES.multimedia) {
+      setCacheProgress(0);
+      pdfRetryCountRef.current = 0;
+      setPdfReloadToken(0);
+      setForceLocalRestart(false);
+      return;
+    }
+    const active = files[index];
+    const pathKey = String(active?.url || "");
+    if (!pathKey) {
+      setCacheProgress(0);
+      setForceLocalRestart(false);
+      return;
+    }
+
+    const initial = getCacheProgress(pathKey);
+    setCacheProgress(initial?.percent || 0);
+
+    const unsubscribe = subscribeCacheProgress((path, progress) => {
+      if (path !== pathKey) return;
+      setCacheProgress(progress?.percent || 0);
+    });
+
+    return () => {
+      unsubscribe();
+    };
+  }, [files, index, sourceType]);
+
+  useEffect(() => {
+    if (sourceType !== SOURCE_TYPES.multimedia) return;
+    if (!files.length) return;
+
+    const file = files[index];
+    const isVideo = isVideoFile(file);
+    if (!isVideo) return;
+
+    const localPlayableUri = normalizeMediaUri(String(file?.remoteUrl || ""));
+    const hasLocalPlayableUri = /^file:\/\//i.test(localPlayableUri);
+    const usingRemote = /^https?:\/\//i.test(uri);
+
+    if (!hasLocalPlayableUri || !usingRemote) return;
+
+    if (pendingLocalSwitchRef.current) return;
+
+    // When cache finishes, switch once to local at the next natural end (avoid mid-play glitch).
+    pendingLocalSwitchRef.current = setTimeout(() => {
+      pendingLocalSwitchRef.current = null;
+      if (!isMountedRef.current) return;
+      // Avoid mid-playback glitch: allow restart at end to switch to local.
+      setForceLocalRestart(true);
+    }, 3000);
+
+    return () => {
+      if (pendingLocalSwitchRef.current) {
+        clearTimeout(pendingLocalSwitchRef.current);
+        pendingLocalSwitchRef.current = null;
+      }
+    };
+  }, [files, index, uri, sourceType]);
 
   useEffect(() => {
     const animationType = config?.animation || "slide";
@@ -325,6 +518,10 @@ export default function SlideRenderer({
       config?.sections?.[sectionIndex]?.slideDirection || "left";
 
     if (animationType === "fade") {
+      translateX.setValue(0);
+      translateY.setValue(0);
+      rotateY.setValue(0);
+      scale.setValue(1);
       opacity.setValue(0);
       Animated.timing(opacity, {
         toValue: 1,
@@ -494,12 +691,38 @@ export default function SlideRenderer({
         sourceType,
         title: sourceUrl || "URL Source",
         uri,
+        cacheStatus: "Live",
+      });
+      return;
+    }
+
+    if (!files.length) {
+      const offline = !server;
+      onPlaybackChange({
+        section: sectionIndex + 1,
+        sourceType: "multimedia",
+        title: offline ? "Offline - no cached media" : "No media uploaded",
+        mediaType: "",
+        uri: "",
+        cacheStatus: offline ? "Offline" : "Empty",
       });
       return;
     }
 
     const active = files[index];
     if (!active) return;
+    const localPlayableUri = normalizeMediaUri(String(active?.remoteUrl || ""));
+    const hasLocalPlayableUri = /^file:\/\//i.test(localPlayableUri);
+    const hasLocalFile = !!String(active?.localPath || "").trim();
+    const isCached = /^file:\/\//i.test(uri);
+    const isMarkedCached = isCached || hasLocalFile || hasLocalPlayableUri;
+    const cacheStatus = !uri
+      ? ""
+      : isMarkedCached
+      ? "Cached"
+      : server
+      ? "Streaming"
+      : "Offline";
     onPlaybackChange({
       section: sectionIndex + 1,
       sourceType: "multimedia",
@@ -507,6 +730,7 @@ export default function SlideRenderer({
       mediaType: active.type || "",
       uri,
       page: active.page || 0,
+      cacheStatus,
     });
   }, [files, index, sectionIndex, sourceType, sourceUrl, uri, onPlaybackChange]);
 
@@ -532,8 +756,9 @@ export default function SlideRenderer({
       resetPdfState();
       return;
     }
+    pdfRetryCountRef.current = 0;
 
-    const currentPdfUrl = buildPdfViewerUrl(uri, Number(current?.page || 1));
+    const currentPdfUrl = buildPdfViewerUrl(uri, Number(current?.page || 1), pdfReloadToken);
     const nextIndex = files.length > 1 ? (index + 1) % files.length : -1;
     const nextFile = nextIndex >= 0 ? files[nextIndex] : null;
     const nextIsPdf =
@@ -544,12 +769,14 @@ export default function SlideRenderer({
       nextIsPdf && nextFile?.remoteUrl
         ? buildPdfViewerUrl(
             normalizeMediaUri(String(nextFile.remoteUrl || "")),
-            Number(nextFile?.page || 1)
+            Number(nextFile?.page || 1),
+            pdfReloadToken
           )
         : nextIsPdf && server && nextFile?.url
         ? buildPdfViewerUrl(
             buildRemoteMediaUri(server, nextFile.url, nextFile?.mtimeMs || mediaVersion),
-            Number(nextFile?.page || 1)
+            Number(nextFile?.page || 1),
+            pdfReloadToken
           )
         : "";
 
@@ -604,6 +831,7 @@ export default function SlideRenderer({
   }, [files, index, uri, sourceType, server, mediaVersion, pdfVisibleSlot]);
 
   const handlePdfLoadEnd = (slot: "a" | "b") => {
+    pdfRetryCountRef.current = 0;
     setPdfSlotLoaded((prev) => ({ ...prev, [slot]: true }));
   };
 
@@ -654,9 +882,26 @@ export default function SlideRenderer({
   }
 
   if (!files.length) {
+    const offline = sourceType === SOURCE_TYPES.multimedia && !server;
+    const emptyTitle = offline ? "Offline Content" : "No Media Uploaded";
+    const emptySubtitle = offline
+      ? "No cached media for this section."
+      : "Upload files to start playback.";
+    const emptyHint = offline
+      ? "Connect to CMS to sync content."
+      : "Open CMS and upload media to this grid.";
     return (
-      <View style={styles.center}>
-        <Text style={{ color: "#fff" }}>No Media Found</Text>
+      <View style={styles.emptyWrap}>
+        <View style={styles.emptyCard}>
+          <View style={styles.emptyBadge}>
+            <Text style={styles.emptyBadgeText}>SECTION {sectionIndex + 1}</Text>
+          </View>
+          <Text style={styles.emptyTitle}>{emptyTitle}</Text>
+          <Text style={styles.emptySubtitle}>{emptySubtitle}</Text>
+          <View style={styles.emptyHintBox}>
+            <Text style={styles.emptyHintText}>{emptyHint}</Text>
+          </View>
+        </View>
       </View>
     );
   }
@@ -669,6 +914,20 @@ export default function SlideRenderer({
   const isPdf = fileType === "pdf" || /\.pdf$/i.test(file.originalName || file.name || "");
   const pdfPage = Number(file?.page || 1);
   const showProcessingOverlay = !!String(processingMessage || "").trim();
+  const isCached = /^file:\/\//i.test(uri);
+  const hasLocalFile = !!String(file?.localPath || "").trim();
+  const isMarkedCached = isCached || hasLocalFile || /^file:\/\//i.test(String(file?.remoteUrl || ""));
+  const cacheStatus = !uri
+    ? ""
+    : isMarkedCached
+    ? "Cached"
+    : server
+    ? "Streaming"
+    : "Offline";
+  const showCacheBadge = sourceType === SOURCE_TYPES.multimedia && !!cacheStatus;
+  const showCacheProgress =
+    cacheStatus === "Streaming" && !isMarkedCached && cacheProgress > 0 && cacheProgress < 100;
+  const showLiveBadge = !!uri;
 
   return (
     <Animated.View
@@ -691,6 +950,32 @@ export default function SlideRenderer({
         },
       ]}
     >
+      {showLiveBadge ? (
+        <View style={styles.liveBadge}>
+          <Animated.View style={[styles.liveDot, { opacity: livePulse }]} />
+          <Text style={styles.liveText}>LIVE</Text>
+        </View>
+      ) : null}
+      {showCacheBadge ? (
+        <View
+          style={[
+            styles.cacheBadge,
+            cacheStatus === "Offline" ? styles.cacheBadgeOffline : null,
+          ]}
+        >
+          <Text style={styles.cacheBadgeText}>{cacheStatus}</Text>
+          {showCacheProgress ? (
+            <View style={styles.cacheProgressTrack}>
+              <View
+                style={[
+                  styles.cacheProgressFill,
+                  { width: `${cacheProgress}%` },
+                ]}
+              />
+            </View>
+          ) : null}
+        </View>
+      ) : null}
       {showProcessingOverlay ? (
         <View style={styles.processingWrap}>
           <Text style={styles.processingTitle}>Updating Section</Text>
@@ -700,15 +985,32 @@ export default function SlideRenderer({
         </View>
       ) : isVideo ? (
         <View style={mediaRotateLayerStyle}>
-          <NativeVideoPlayer
+         <NativeVideoPlayer
             key={`${file.name}-${index}-${videoReloadToken}-${String(videoViewType)}`}
             src={uri}
             style={styles.media}
             rotation={0}
             muted
             resizeMode="stretch"
-            repeat={files.length === 1}
-            onEnd={() => files.length > 1 && goNext()}
+            repeat={files.length === 1 && !forceLocalRestart}
+            onEnd={() => {
+              if (forceLocalRestart) {
+                const localPlayableUri = normalizeMediaUri(String(file?.remoteUrl || ""));
+                if (/^file:\/\//i.test(localPlayableUri)) {
+                  pinnedMediaUriRef.current = {
+                    identity: getMediaIdentity(file),
+                    uri: localPlayableUri,
+                  };
+                  setUri(localPlayableUri);
+                  setVideoReloadToken((prev) => prev + 1);
+                }
+                setForceLocalRestart(false);
+                return;
+              }
+              if (files.length > 1) {
+                goNext();
+              }
+            }}
             onReady={() => {
               videoRetryCountRef.current = 0;
             }}
@@ -719,6 +1021,7 @@ export default function SlideRenderer({
         <View style={mediaRotateLayerStyle}>
           {pdfSlotUrls.a ? (
             <WebView
+              key={`pdf-a-${pdfReloadToken}`}
               source={{ uri: pdfSlotUrls.a }}
               style={[
                 styles.media,
@@ -732,11 +1035,12 @@ export default function SlideRenderer({
               mixedContentMode="always"
               mediaPlaybackRequiresUserAction={false}
               onLoadEnd={() => handlePdfLoadEnd("a")}
-              onError={handleRenderError}
+              onError={handlePdfError}
             />
           ) : null}
           {pdfSlotUrls.b ? (
             <WebView
+              key={`pdf-b-${pdfReloadToken}`}
               source={{ uri: pdfSlotUrls.b }}
               style={[
                 styles.media,
@@ -750,7 +1054,7 @@ export default function SlideRenderer({
               mixedContentMode="always"
               mediaPlaybackRequiresUserAction={false}
               onLoadEnd={() => handlePdfLoadEnd("b")}
-              onError={handleRenderError}
+              onError={handlePdfError}
             />
           ) : null}
         </View>
@@ -831,6 +1135,128 @@ const styles = StyleSheet.create({
   },
   pdfHidden: {
     opacity: 0,
+  },
+  cacheBadge: {
+    position: "absolute",
+    top: 6,
+    right: 44,
+    paddingHorizontal: 6,
+    paddingVertical: 3,
+    borderRadius: 8,
+    backgroundColor: "rgba(8,12,18,0.45)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.12)",
+    zIndex: 5,
+  },
+  cacheBadgeOffline: {
+    backgroundColor: "rgba(120,16,26,0.8)",
+    borderColor: "rgba(255,160,160,0.5)",
+  },
+  cacheBadgeText: {
+    color: "#ffffff",
+    fontSize: 9,
+    fontWeight: "600",
+    letterSpacing: 0.15,
+  },
+  liveBadge: {
+    position: "absolute",
+    top: 6,
+    left: 8,
+    paddingHorizontal: 6,
+    paddingVertical: 3,
+    borderRadius: 8,
+    backgroundColor: "rgba(10,14,18,0.55)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.15)",
+    zIndex: 5,
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  liveDot: {
+    width: 4,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: "#7fffd4",
+    marginRight: 4,
+  },
+  liveText: {
+    color: "#e9fff8",
+    fontSize: 9,
+    fontWeight: "700",
+    letterSpacing: 0.4,
+  },
+  cacheProgressTrack: {
+    marginTop: 4,
+    height: 3,
+    borderRadius: 999,
+    backgroundColor: "rgba(255,255,255,0.2)",
+    overflow: "hidden",
+  },
+  cacheProgressFill: {
+    height: 3,
+    borderRadius: 999,
+    backgroundColor: "#7fffd4",
+  },
+  emptyWrap: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    paddingHorizontal: 20,
+    backgroundColor: "#05080d",
+  },
+  emptyCard: {
+    width: "86%",
+    maxWidth: 420,
+    borderRadius: 22,
+    borderWidth: 1,
+    borderColor: "rgba(130, 190, 230, 0.28)",
+    backgroundColor: "rgba(12, 18, 26, 0.92)",
+    paddingHorizontal: 22,
+    paddingVertical: 24,
+    alignItems: "center",
+  },
+  emptyBadge: {
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    borderRadius: 999,
+    backgroundColor: "rgba(62, 188, 255, 0.18)",
+    borderWidth: 1,
+    borderColor: "rgba(120, 220, 255, 0.5)",
+    marginBottom: 14,
+  },
+  emptyBadgeText: {
+    color: "#bfeaff",
+    fontSize: 11,
+    letterSpacing: 1.2,
+    fontWeight: "700",
+  },
+  emptyTitle: {
+    color: "#ffffff",
+    fontSize: 22,
+    fontWeight: "700",
+    textAlign: "center",
+  },
+  emptySubtitle: {
+    color: "rgba(203, 220, 235, 0.9)",
+    fontSize: 15,
+    lineHeight: 22,
+    textAlign: "center",
+    marginTop: 8,
+  },
+  emptyHintBox: {
+    marginTop: 16,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: 12,
+    backgroundColor: "rgba(6, 12, 18, 0.7)",
+    borderWidth: 1,
+    borderColor: "rgba(120, 180, 220, 0.22)",
+  },
+  emptyHintText: {
+    color: "rgba(164, 210, 245, 0.9)",
+    fontSize: 13,
+    textAlign: "center",
+    lineHeight: 18,
   },
   center: { flex: 1, justifyContent: "center", alignItems: "center" },
 });

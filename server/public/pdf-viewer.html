@@ -24,8 +24,6 @@
       background: #0a0e13;
     }
     canvas {
-      max-width: 100%;
-      max-height: 100%;
       box-shadow: 0 8px 26px rgba(0, 0, 0, 0.45);
       background: white;
     }
@@ -48,25 +46,33 @@
       const params = new URLSearchParams(window.location.search);
       const file = params.get("file");
       const pageNo = Math.max(1, Number(params.get("page") || "1"));
+      const googleViewer = file
+        ? `https://docs.google.com/gview?embedded=1&url=${encodeURIComponent(file)}#page=${pageNo}`
+        : "";
       const fallbackUrl = file
         ? `https://mozilla.github.io/pdf.js/web/viewer.html?file=${encodeURIComponent(file)}#page=${pageNo}&zoom=page-fit`
         : "";
 
       function goFallback() {
+        if (googleViewer) {
+          window.location.replace(googleViewer);
+          return;
+        }
         if (!fallbackUrl) return;
         window.location.replace(fallbackUrl);
       }
 
-      // If CDN script is blocked/unavailable on device network, fail over quickly.
+      // If CDN script is blocked/unavailable on device network, fail over.
       setTimeout(function () {
         if (!window.pdfjsLib) {
           goFallback();
         }
-      }, 1400);
+      }, 4000);
 
       try {
         if (!window.pdfjsLib) {
-          document.getElementById("msg").textContent = "PDF engine not available. Opening fallback...";
+          document.getElementById("msg").textContent =
+            "PDF engine not available. Opening viewer...";
           goFallback();
           return;
         }
@@ -81,7 +87,16 @@
         const stage = document.getElementById("stage");
         const msg = document.getElementById("msg");
 
-        pdfjsLib.getDocument({ url: file }).promise
+        pdfjsLib.getDocument({
+          url: file,
+          rangeChunkSize: 1 * 1024 * 1024,
+          disableAutoFetch: false,
+          disableStream: false,
+          disableFontFace: true,
+          useSystemFonts: true,
+          isEvalSupported: false,
+          stopAtErrors: false,
+        }).promise
           .then((pdf) => pdf.getPage(Math.min(pageNo, pdf.numPages)))
           .then((page) => {
             const viewport = page.getViewport({ scale: 1 });
@@ -105,13 +120,13 @@
             }).promise;
           })
           .catch((err) => {
-            msg.textContent = "Unable to render PDF. Opening fallback...";
+            msg.textContent = "Unable to render PDF. Opening viewer...";
             console.error("PDF render error:", err);
             goFallback();
           });
       } catch (e) {
         const msg = document.getElementById("msg");
-        if (msg) msg.textContent = "Unexpected PDF viewer error. Opening fallback...";
+        if (msg) msg.textContent = "Unexpected PDF viewer error. Opening viewer...";
         goFallback();
       }
     })();

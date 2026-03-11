@@ -4,7 +4,7 @@ import Video, { BufferingStrategyType } from "react-native-video";
 import SlideRenderer from "./SlideRenderer";
 import Ticker from "./Ticker";
 
-const GRID_GAP = 1;
+const GRID_GAP = 0;
 
 function parseRatio(value: any, count: number): number[] {
   const parts = String(value || "")
@@ -47,7 +47,7 @@ function isScheduleActive(schedule: any): boolean {
   return nowMinutes >= start || nowMinutes < end;
 }
 
-export default function PlayerScreen({ config, mediaVersion, uploadProcessingBySection, onPlaybackChange }: any) {
+export default function PlayerScreen({ config, mediaVersion, uploadProcessingBySection, onPlaybackChange, onPlaybackError }: any) {
   const [scheduleOn, setScheduleOn] = useState(true);
   const tickerHeight = config?.ticker?.text
     ? (config.ticker.fontSize || 24) + 12
@@ -74,6 +74,7 @@ export default function PlayerScreen({ config, mediaVersion, uploadProcessingByS
               mediaVersion={mediaVersion}
               processingMessage={uploadProcessingBySection?.[1] || ""}
               onPlaybackChange={onPlaybackChange}
+              onPlaybackError={onPlaybackError}
             />
           </View>
           <View style={{ flex: b, marginHorizontal: GRID_GAP / 2 }}>
@@ -84,6 +85,7 @@ export default function PlayerScreen({ config, mediaVersion, uploadProcessingByS
               mediaVersion={mediaVersion}
               processingMessage={uploadProcessingBySection?.[2] || ""}
               onPlaybackChange={onPlaybackChange}
+              onPlaybackError={onPlaybackError}
             />
           </View>
           <View style={{ flex: c, marginLeft: GRID_GAP / 2 }}>
@@ -94,6 +96,7 @@ export default function PlayerScreen({ config, mediaVersion, uploadProcessingByS
               mediaVersion={mediaVersion}
               processingMessage={uploadProcessingBySection?.[3] || ""}
               onPlaybackChange={onPlaybackChange}
+              onPlaybackError={onPlaybackError}
             />
           </View>
         </View>
@@ -113,6 +116,7 @@ export default function PlayerScreen({ config, mediaVersion, uploadProcessingByS
                 mediaVersion={mediaVersion}
                 processingMessage={uploadProcessingBySection?.[1] || ""}
                 onPlaybackChange={onPlaybackChange}
+                onPlaybackError={onPlaybackError}
               />
             </View>
             <View style={{ flex: 1, marginLeft: GRID_GAP / 2 }}>
@@ -123,6 +127,7 @@ export default function PlayerScreen({ config, mediaVersion, uploadProcessingByS
                 mediaVersion={mediaVersion}
                 processingMessage={uploadProcessingBySection?.[2] || ""}
                 onPlaybackChange={onPlaybackChange}
+                onPlaybackError={onPlaybackError}
               />
             </View>
           </View>
@@ -134,6 +139,7 @@ export default function PlayerScreen({ config, mediaVersion, uploadProcessingByS
               mediaVersion={mediaVersion}
               processingMessage={uploadProcessingBySection?.[3] || ""}
               onPlaybackChange={onPlaybackChange}
+              onPlaybackError={onPlaybackError}
             />
           </View>
         </View>
@@ -151,6 +157,7 @@ export default function PlayerScreen({ config, mediaVersion, uploadProcessingByS
               config={config}
               mediaVersion={mediaVersion}
               processingMessage={uploadProcessingBySection?.[1] || ""}
+              onPlaybackError={onPlaybackError}
             />
           </View>
           <View style={{ flex: bottom, flexDirection: "row", gap: GRID_GAP }}>
@@ -161,6 +168,7 @@ export default function PlayerScreen({ config, mediaVersion, uploadProcessingByS
                 config={config}
                 mediaVersion={mediaVersion}
                 processingMessage={uploadProcessingBySection?.[2] || ""}
+                onPlaybackError={onPlaybackError}
               />
             </View>
             <View style={{ flex: 1, marginLeft: GRID_GAP / 2 }}>
@@ -170,6 +178,7 @@ export default function PlayerScreen({ config, mediaVersion, uploadProcessingByS
                 config={config}
                 mediaVersion={mediaVersion}
                 processingMessage={uploadProcessingBySection?.[3] || ""}
+                onPlaybackError={onPlaybackError}
               />
             </View>
           </View>
@@ -188,6 +197,7 @@ export default function PlayerScreen({ config, mediaVersion, uploadProcessingByS
             mediaVersion={mediaVersion}
             processingMessage={uploadProcessingBySection?.[1] || ""}
             onPlaybackChange={onPlaybackChange}
+            onPlaybackError={onPlaybackError}
           />
         </View>
         <View style={{ flex: b, marginVertical: GRID_GAP / 2 }}>
@@ -198,6 +208,7 @@ export default function PlayerScreen({ config, mediaVersion, uploadProcessingByS
             mediaVersion={mediaVersion}
             processingMessage={uploadProcessingBySection?.[2] || ""}
             onPlaybackChange={onPlaybackChange}
+            onPlaybackError={onPlaybackError}
           />
         </View>
         <View style={{ flex: c, marginTop: GRID_GAP / 2 }}>
@@ -208,6 +219,7 @@ export default function PlayerScreen({ config, mediaVersion, uploadProcessingByS
             mediaVersion={mediaVersion}
             processingMessage={uploadProcessingBySection?.[3] || ""}
             onPlaybackChange={onPlaybackChange}
+            onPlaybackError={onPlaybackError}
           />
         </View>
       </View>
@@ -216,6 +228,37 @@ export default function PlayerScreen({ config, mediaVersion, uploadProcessingByS
 
   const renderGrid2 = () => {
     const [left, right] = parseRatio(gridRatio, 2);
+    const isHorizontal = grid3Layout === "stack-h";
+
+    if (!isHorizontal) {
+      return (
+        <View style={{ flex: 1, flexDirection: "column", gap: GRID_GAP }}>
+          <View style={{ flex: left, marginBottom: GRID_GAP / 2 }}>
+            <SlideRenderer
+              key="section-0"
+              config={config}
+              sectionIndex={0}
+              mediaVersion={mediaVersion}
+              processingMessage={uploadProcessingBySection?.[1] || ""}
+              onPlaybackChange={onPlaybackChange}
+              onPlaybackError={onPlaybackError}
+            />
+          </View>
+          <View style={{ flex: right, marginTop: GRID_GAP / 2 }}>
+            <SlideRenderer
+              key="section-1"
+              config={config}
+              sectionIndex={1}
+              mediaVersion={mediaVersion}
+              processingMessage={uploadProcessingBySection?.[2] || ""}
+              onPlaybackChange={onPlaybackChange}
+              onPlaybackError={onPlaybackError}
+            />
+          </View>
+        </View>
+      );
+    }
+
     return (
       <View style={{ flex: 1, flexDirection: "row", gap: GRID_GAP }}>
         <View style={{ flex: left, marginRight: GRID_GAP / 2 }}>
@@ -226,6 +269,7 @@ export default function PlayerScreen({ config, mediaVersion, uploadProcessingByS
             mediaVersion={mediaVersion}
             processingMessage={uploadProcessingBySection?.[1] || ""}
             onPlaybackChange={onPlaybackChange}
+              onPlaybackError={onPlaybackError}
           />
         </View>
         <View style={{ flex: right, marginLeft: GRID_GAP / 2 }}>
@@ -236,6 +280,7 @@ export default function PlayerScreen({ config, mediaVersion, uploadProcessingByS
             mediaVersion={mediaVersion}
             processingMessage={uploadProcessingBySection?.[2] || ""}
             onPlaybackChange={onPlaybackChange}
+              onPlaybackError={onPlaybackError}
           />
         </View>
       </View>
@@ -318,12 +363,13 @@ export default function PlayerScreen({ config, mediaVersion, uploadProcessingByS
 
   return (
     <View style={{ flex: 1, backgroundColor: config.bgColor }}>
+      {config.ticker?.text && config.ticker?.position === "top" ? (
+        <Ticker ticker={config.ticker} />
+      ) : null}
       <View
         style={{
           flex: 1,
           flexDirection: config.layout === "fullscreen" ? "column" : "row",
-          marginTop: config.ticker?.position === "top" ? tickerHeight : 0,
-          marginBottom: config.ticker?.position === "bottom" ? tickerHeight : 0,
         }}
       >
         {config.layout === "fullscreen" && (
@@ -334,12 +380,15 @@ export default function PlayerScreen({ config, mediaVersion, uploadProcessingByS
             mediaVersion={mediaVersion}
             processingMessage={uploadProcessingBySection?.[1] || ""}
             onPlaybackChange={onPlaybackChange}
+            onPlaybackError={onPlaybackError}
           />
         )}
         {config.layout === "grid2" && renderGrid2()}
         {config.layout === "grid3" && renderGrid3()}
       </View>
-      {config.ticker?.text && <Ticker ticker={config.ticker} />}
+      {config.ticker?.text && config.ticker?.position !== "top" ? (
+        <Ticker ticker={config.ticker} />
+      ) : null}
     </View>
   );
 }

@@ -102,3 +102,6 @@ android/build/
 
 # VS Code
 .vscode/
+server/data/configs/
+server/uploads/
+server/data/device-groups.json

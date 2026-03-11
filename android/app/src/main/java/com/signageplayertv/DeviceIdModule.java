@@ -292,14 +292,29 @@ public class DeviceIdModule extends ReactContextBaseJavaModule {
             AlarmManager alarmManager = (AlarmManager) context.getSystemService(Context.ALARM_SERVICE);
             if (alarmManager == null) return;
 
+            // Cancel activity-based reopen (current behavior)
+            Intent activityIntent = new Intent(context, MainActivity.class);
+            activityIntent.setAction(Intent.ACTION_MAIN);
+            activityIntent.addCategory(Intent.CATEGORY_LEANBACK_LAUNCHER);
+            activityIntent.addCategory(Intent.CATEGORY_LAUNCHER);
+            activityIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+            PendingIntent activityPending = PendingIntent.getActivity(
+                    context,
+                    requestCode,
+                    activityIntent,
+                    PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
+            );
+            alarmManager.cancel(activityPending);
+
+            // Best-effort cleanup for older broadcast-based reopen.
             Intent reopenIntent = new Intent(context, ReopenReceiver.class);
-            PendingIntent pendingIntent = PendingIntent.getBroadcast(
+            PendingIntent broadcastPending = PendingIntent.getBroadcast(
                     context,
                     requestCode,
                     reopenIntent,
                     PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
             );
-            alarmManager.cancel(pendingIntent);
+            alarmManager.cancel(broadcastPending);
         } catch (Exception ignored) {
             // Best-effort cleanup. Preference remains source of truth.
         }

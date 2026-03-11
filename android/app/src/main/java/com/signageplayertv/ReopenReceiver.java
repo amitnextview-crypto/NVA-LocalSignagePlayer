@@ -20,10 +20,22 @@ public class ReopenReceiver extends BroadcastReceiver {
                 return;
             }
 
-            Intent launchIntent = context.getPackageManager()
-                    .getLaunchIntentForPackage(context.getPackageName());
-            if (launchIntent != null) {
-                launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+            Intent launchIntent = new Intent(context, MainActivity.class);
+            launchIntent.setAction(Intent.ACTION_MAIN);
+            launchIntent.addCategory(Intent.CATEGORY_LEANBACK_LAUNCHER);
+            launchIntent.addCategory(Intent.CATEGORY_LAUNCHER);
+            launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+
+            try {
+                android.app.PendingIntent pendingIntent = android.app.PendingIntent.getActivity(
+                        context,
+                        7203,
+                        launchIntent,
+                        android.app.PendingIntent.FLAG_UPDATE_CURRENT | android.app.PendingIntent.FLAG_IMMUTABLE
+                );
+                pendingIntent.send();
+                Log.d("ReopenReceiver", "App relaunch requested via PendingIntent");
+            } catch (Exception pendingErr) {
                 context.startActivity(launchIntent);
                 Log.d("ReopenReceiver", "App relaunch requested");
             }

@@ -112,15 +112,9 @@ override fun onWindowFocusChanged(hasFocus: Boolean) {
     reopenHandler.removeCallbacks(reopenRunnable)
     reopenHandler.postDelayed(reopenRunnable, REOPEN_DELAY_MS)
 
-    // 2) OS alarm fallback for stricter TV builds.
+    // 2) OS alarm fallback for stricter TV builds (use activity PendingIntent to bypass BAL).
     val alarmManager = getSystemService(Context.ALARM_SERVICE) as AlarmManager
-    val reopenIntent = Intent(this, ReopenReceiver::class.java)
-    val pendingIntent = PendingIntent.getBroadcast(
-      this,
-      REOPEN_REQ_CODE,
-      reopenIntent,
-      PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-    )
+    val pendingIntent = buildReopenPendingIntent()
     val triggerAt = System.currentTimeMillis() + REOPEN_DELAY_MS
 
     try {
@@ -145,14 +139,23 @@ override fun onWindowFocusChanged(hasFocus: Boolean) {
   private fun cancelScheduledReopen() {
     reopenHandler.removeCallbacks(reopenRunnable)
     val alarmManager = getSystemService(Context.ALARM_SERVICE) as AlarmManager
-    val reopenIntent = Intent(this, ReopenReceiver::class.java)
-    val pendingIntent = PendingIntent.getBroadcast(
+    val pendingIntent = buildReopenPendingIntent()
+    alarmManager.cancel(pendingIntent)
+  }
+
+  private fun buildReopenPendingIntent(): PendingIntent {
+    val intent = Intent(this, MainActivity::class.java).apply {
+      action = Intent.ACTION_MAIN
+      addCategory(Intent.CATEGORY_LEANBACK_LAUNCHER)
+      addCategory(Intent.CATEGORY_LAUNCHER)
+      addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+    }
+    return PendingIntent.getActivity(
       this,
       REOPEN_REQ_CODE,
-      reopenIntent,
+      intent,
       PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
     )
-    alarmManager.cancel(pendingIntent)
   }
 
   override fun onBackPressed() {

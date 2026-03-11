@@ -9,8 +9,43 @@ const MEDIA_ROOT = `${MEDIA_DIR}/files`;
 const MANIFEST_PATH = `${MEDIA_DIR}/manifest.json`;
 const LIST_CACHE_PATH = `${MEDIA_DIR}/list-cache.json`;
 const MEDIA_FETCH_TIMEOUT_MS = 2500;
-const DOWNLOAD_CONCURRENCY = 1;
-const LIST_REFRESH_MIN_INTERVAL_MS = 2000;
+const DOWNLOAD_CONCURRENCY = 2;
+const LIST_REFRESH_MIN_INTERVAL_MS = 1000;
+const SMALL_FILE_AWAIT_BYTES = 5 * 1024 * 1024;
+
+type CacheProgress = {
+  received: number;
+  total: number;
+  percent: number;
+  updatedAt: number;
+};
+
+const progressMap: Record<string, CacheProgress> = {};
+const progressListeners = new Set<(path: string, progress: CacheProgress) => void>();
+
+export function subscribeCacheProgress(
+  handler: (path: string, progress: CacheProgress) => void
+) {
+  progressListeners.add(handler);
+  return () => progressListeners.delete(handler);
+}
+
+export function getCacheProgress(path: string): CacheProgress | null {
+  return progressMap[path] || null;
+}
+
+function emitProgress(path: string, progress: CacheProgress) {
+  progressMap[path] = progress;
+  for (const listener of progressListeners) {
+    try {
+      listener(path, progress);
+    } catch {
+      // ignore
+    }
+  }
+}
+// Short grace period avoids deleting files that might still be in active playback pipeline.
+const CACHE_RETENTION_MS = 2 * 60 * 1000;
 
 type MediaItem = {
   name?: string;
@@ -31,6 +66,7 @@ type ManifestEntry = {
   localPath: string;
   size: number;
   mtimeMs: number;
+  lastSeenAt?: number;
 };
 
 type ManifestMap = Record<string, ManifestEntry>;
@@ -187,29 +223,83 @@ async function downloadIfNeeded(
 
   if (entry && (await fileExists(entry.localPath))) {
     if (entry.size === expectedSize && entry.mtimeMs === expectedMtime) {
+      entry.lastSeenAt = Date.now();
       return entry.localPath;
     }
   }
 
   const targetPath = localPathFor(remoteUrl, section, sourceName);
+  emitProgress(remotePath, {
+    total: expectedSize || 0,
+    received: 0,
+    percent: 0,
+    updatedAt: Date.now(),
+  });
+  // If the file already exists locally (manifest missing), reuse it.
+  try {
+    if (await fileExists(targetPath)) {
+      const stat = await RNFS.stat(targetPath);
+      const size = Number(stat?.size || 0);
+      if (!expectedSize || size === expectedSize) {
+        manifest[remotePath] = {
+          url: remotePath,
+          localPath: targetPath,
+          size: expectedSize || size,
+          mtimeMs: expectedMtime,
+          lastSeenAt: Date.now(),
+        };
+        emitProgress(remotePath, {
+          total: expectedSize || size || 0,
+          received: expectedSize || size || 0,
+          percent: 100,
+          updatedAt: Date.now(),
+        });
+        return targetPath;
+      }
+    }
+  } catch {
+    // continue to download
+  }
   try {
     const download = RNFS.downloadFile({
       fromUrl: `${remoteUrl}?ts=${Date.now()}`,
       toFile: targetPath,
       background: true,
       discretionary: false,
+      progressInterval: 500,
+      progress: (data) => {
+        const total = Number(data?.contentLength || 0);
+        const received = Number(data?.bytesWritten || 0);
+        if (!total) return;
+        const percent = Math.max(0, Math.min(100, Math.round((received / total) * 100)));
+        emitProgress(remotePath, {
+          total,
+          received,
+          percent,
+          updatedAt: Date.now(),
+        });
+      },
     });
     const result = await download.promise;
     if (result.statusCode < 200 || result.statusCode >= 300) {
       return entry?.localPath && (await fileExists(entry.localPath)) ? entry.localPath : null;
     }
 
+    const finalStat = await RNFS.stat(targetPath);
+    const finalSize = Number(finalStat?.size || 0);
     manifest[remotePath] = {
       url: remotePath,
       localPath: targetPath,
-      size: expectedSize,
+      size: expectedSize || finalSize,
       mtimeMs: expectedMtime,
+      lastSeenAt: Date.now(),
     };
+    emitProgress(remotePath, {
+      total: expectedSize || finalSize || 0,
+      received: expectedSize || finalSize || 0,
+      percent: 100,
+      updatedAt: Date.now(),
+    });
     return targetPath;
   } catch {
     return entry?.localPath && (await fileExists(entry.localPath)) ? entry.localPath : null;
@@ -238,11 +328,74 @@ async function downloadIfNeededDeduped(
 }
 
 async function removeStaleFiles(manifest: ManifestMap, activeUrls: Set<string>) {
+  const now = Date.now();
+  const activeList = Array.from(activeUrls);
+  const activeCachedChecks = await Promise.all(
+    activeList.map(async (url) => {
+      const entry = manifest[url];
+      if (!entry || !entry.localPath) return false;
+      return await fileExists(entry.localPath);
+    })
+  );
+  const canPrune = activeCachedChecks.every(Boolean);
+
   for (const url of Object.keys(manifest)) {
-    if (activeUrls.has(url)) continue;
+    const entry = manifest[url];
+    if (!entry) continue;
+    if (activeUrls.has(url)) {
+      entry.lastSeenAt = now;
+      continue;
+    }
+    if (!entry.lastSeenAt) {
+      entry.lastSeenAt = now;
+      continue;
+    }
+    if (now - Number(entry.lastSeenAt || 0) < CACHE_RETENTION_MS) continue;
+    if (!canPrune) continue;
+
     // Avoid unlinking immediately; a file can still be in active playback pipeline.
-    // Deleting during playback can crash native decoders on some Android TV devices.
+    // Delete only after a retention window to reduce playback risk.
+    try {
+      if (entry.localPath && (await fileExists(entry.localPath))) {
+        await RNFS.unlink(entry.localPath);
+      }
+    } catch {
+      // ignore
+    }
     delete manifest[url];
+  }
+}
+
+async function applyManifestToCachedList(list: MediaItem[]): Promise<MediaItem[]> {
+  if (!Array.isArray(list) || !list.length) return [];
+  try {
+    await ensureMediaDirs();
+    const manifest = await readManifest();
+    let changed = false;
+
+    const mapped = await Promise.all(
+      list.map(async (item) => {
+        const path = String(item?.url || "");
+        if (!path) return item;
+        const entry = manifest[path];
+        if (!entry || !(await fileExists(entry.localPath))) return item;
+        const fileUri = localUri(entry.localPath);
+        if (item.remoteUrl !== fileUri || item.localPath !== entry.localPath) {
+          changed = true;
+          return { ...item, localPath: entry.localPath, remoteUrl: fileUri };
+        }
+        return item;
+      })
+    );
+
+    if (changed) {
+      await writeListCache(mapped);
+      return mapped;
+    }
+
+    return mapped;
+  } catch {
+    return list;
   }
 }
 
@@ -293,20 +446,29 @@ async function mapServerListToPlayable(
     if (existing && (await fileExists(existing.localPath))) {
       const expectedSize = Number(item.size || 0);
       const expectedMtime = Number(item.mtimeMs || 0);
-      if (existing.size === expectedSize && existing.mtimeMs === expectedMtime) {
-        resolvedByUrl[path] = existing.localPath;
-        continue;
-      }
+    if (existing.size === expectedSize && existing.mtimeMs === expectedMtime) {
+      existing.lastSeenAt = Date.now();
+      resolvedByUrl[path] = existing.localPath;
+      continue;
+    }
     }
 
     // Keep playback immediate: use remote now, download cache in background.
     // Limit caching to reasonable file sizes to avoid memory pressure on TV devices.
     if (shouldCacheItem(item)) {
+      const sizeBytes = Number(item?.size || 0);
+      if (sizeBytes > 0 && sizeBytes <= SMALL_FILE_AWAIT_BYTES) {
+        const localPathValue = await downloadIfNeededDeduped(server, item, manifest);
+        if (localPathValue) {
+          resolvedByUrl[path] = localPathValue;
+          continue;
+        }
+      }
       pendingDownloads.push(async () => {
-          const localPathValue = await downloadIfNeededDeduped(server, item, manifest);
-          if (localPathValue) {
-            resolvedByUrl[path] = localPathValue;
-          }
+        const localPathValue = await downloadIfNeededDeduped(server, item, manifest);
+        if (localPathValue) {
+          resolvedByUrl[path] = localPathValue;
+        }
       });
     }
   }
@@ -410,9 +572,10 @@ async function loadCachedPlayableList(): Promise<MediaItem[]> {
   if (memoryListCache.length) return memoryListCache;
   try {
     const cached = sanitizeCachedList(await readListCache());
-    memoryListCache = cached;
+    const mapped = await applyManifestToCachedList(cached);
+    memoryListCache = mapped;
     memoryListCacheAtMs = Date.now();
-    return cached;
+    return mapped;
   } catch (e) {
     console.log("Load cached playable list failed", e);
     return [];

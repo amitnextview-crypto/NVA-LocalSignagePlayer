@@ -7,21 +7,23 @@ export default function AdminButton({ onOpen }: any) {
       onPress={onOpen}
       style={{
         position: "absolute",
-        top: 20,
-        right: 20,
-        padding: 10, // easier to click
-        backgroundColor: "rgba(0,0,0,0.5)", // transparent background
-        borderRadius: 20,
+        top: 4,
+        right: 12,
+        padding: 4,
+        backgroundColor: "rgba(8,12,18,0.55)",
+        borderRadius: 999,
+        borderWidth: 1,
+        borderColor: "rgba(255,255,255,0.12)",
       }}
     >
       <Text
         style={{
-          fontSize: 22,
-          color: "rgba(255,255,255,0.7)", // white + transparent
-          fontWeight: "bold",
+          fontSize: 12,
+          color: "rgba(255,255,255,0.72)",
+          fontWeight: "700",
         }}
       >
-        ⚙
+        {"\u2699"}
       </Text>
     </TouchableOpacity>
   );

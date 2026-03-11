@@ -42,6 +42,47 @@ const LICENSE_INIT_RETRY_DELAY_MS = 1200;
 const APK_UPDATE_PENDING_KEY = "apk_update_pending_v1";
 const APK_UPDATE_PENDING_MAX_AGE_MS = 1000 * 60 * 60;
 
+type RuntimeErrorInfo = {
+  message: string;
+  detail?: string;
+  source?: string;
+  time: string;
+};
+
+class PlayerErrorBoundary extends React.Component<
+  { onError?: (error: Error) => void; children: React.ReactNode },
+  { hasError: boolean; errorMessage: string }
+> {
+  constructor(props: any) {
+    super(props);
+    this.state = { hasError: false, errorMessage: "" };
+  }
+
+  static getDerivedStateFromError(error: Error) {
+    return { hasError: true, errorMessage: String(error?.message || error) };
+  }
+
+  componentDidCatch(error: Error) {
+    if (this.props.onError) {
+      this.props.onError(error);
+    }
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <View style={styles.errorBoundaryWrap}>
+          <Text style={styles.errorBoundaryTitle}>Playback Error</Text>
+          <Text style={styles.errorBoundaryText}>
+            {this.state.errorMessage || "Unexpected error. Please check logs."}
+          </Text>
+        </View>
+      );
+    }
+    return this.props.children as any;
+  }
+}
+
 function wait(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -85,13 +126,47 @@ export default function App() {
   const [licenseInput, setLicenseInput] = useState("");
   const [licenseStatus, setLicenseStatus] = useState("Checking activation...");
   const [licenseBusy, setLicenseBusy] = useState(false);
+  const [lastError, setLastError] = useState<RuntimeErrorInfo | null>(null);
   const [uploadProcessingBySection, setUploadProcessingBySection] = useState<
     Record<number, string>
   >({});
   const playbackBySectionRef = useRef<Record<number, any>>({});
+  const lastMetaRef = useRef<any | null>(null);
   const lastConfigSyncAtRef = useRef("");
   const lastMediaSyncAtRef = useRef("");
   const pendingApkUpdateSuccessRef = useRef<any | null>(null);
+  const errorClearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const reportRuntimeError = (message: string, detail = "", source = "runtime") => {
+    if (errorClearTimerRef.current) {
+      clearTimeout(errorClearTimerRef.current);
+      errorClearTimerRef.current = null;
+    }
+    const friendlyMessage =
+      source === "player"
+        ? String(message || "Playback error")
+        : "Something went wrong. Player will try to recover.";
+    const friendlyDetail = detail ? String(detail) : "";
+
+    setLastError({
+      message: friendlyMessage,
+      detail: friendlyDetail,
+      source,
+      time: new Date().toISOString(),
+    });
+    if (socket?.connected) {
+      socket.emit("device-error", {
+        deviceId: deviceIdRef.current,
+        type: source,
+        message: detail ? `${message} | ${detail}` : message,
+      });
+    }
+    // Auto-clear after a while to avoid blocking playback forever.
+    errorClearTimerRef.current = setTimeout(() => {
+      setLastError(null);
+      errorClearTimerRef.current = null;
+    }, 20000);
+  };
 
   async function clearRuntimePlaybackData() {
     // Intentionally do not clear AsyncStorage license keys.
@@ -185,6 +260,26 @@ export default function App() {
     autoClearOnBoot();
     return () => {
       mounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    const ErrorUtils = (global as any)?.ErrorUtils;
+    if (!ErrorUtils?.setGlobalHandler) return;
+
+    const prevHandler = ErrorUtils.getGlobalHandler ? ErrorUtils.getGlobalHandler() : null;
+    ErrorUtils.setGlobalHandler((error: any, isFatal?: boolean) => {
+      const message = String(error?.message || error || "Unknown JS error");
+      reportRuntimeError(message, isFatal ? "fatal" : "non-fatal", "js");
+      if (__DEV__ && typeof prevHandler === "function") {
+        prevHandler(error, isFatal);
+      }
+    });
+
+    return () => {
+      if (typeof prevHandler === "function") {
+        ErrorUtils.setGlobalHandler(prevHandler);
+      }
     };
   }, []);
 
@@ -566,6 +661,7 @@ export default function App() {
 
     const emitDeviceHealthSnapshot = async (appState: string, extra: Record<string, any> = {}) => {
       const meta = await collectDeviceMeta(extra);
+      lastMetaRef.current = meta;
       emitDeviceHealth(appState, meta);
     };
 
@@ -1003,9 +1099,30 @@ export default function App() {
         sourceType: String(payload?.sourceType || ""),
         mediaType: String(payload?.mediaType || ""),
         page: Number(payload?.page || 0),
+        cacheStatus: String(payload?.cacheStatus || ""),
         updatedAt: new Date().toISOString(),
       },
     };
+    if (socket?.connected && lastMetaRef.current) {
+      socket.emit("device-health", {
+        deviceId: deviceIdRef.current,
+        appState: "playback-change",
+        meta: {
+          ...lastMetaRef.current,
+          currentPlaybackBySection: playbackBySectionRef.current,
+        },
+      });
+    }
+  };
+
+  const handlePlaybackError = (payload: any) => {
+    const message = String(payload?.message || "Playback error");
+    const detailParts = [
+      payload?.name ? `File: ${payload.name}` : "",
+      payload?.mediaType ? `Type: ${payload.mediaType}` : "",
+    ].filter(Boolean);
+    const detail = detailParts.join(" · ");
+    reportRuntimeError(message, detail, "player");
   };
 
   const { width, height } = Dimensions.get("window");
@@ -1043,15 +1160,27 @@ export default function App() {
           transform: [{ rotate: rotation }],
         }}
       >
-        <PlayerScreen
-          config={safeConfig}
-          mediaVersion={mediaVersion}
-          uploadProcessingBySection={uploadProcessingBySection}
-          onPlaybackChange={handlePlaybackChange}
-        />
+        <PlayerErrorBoundary onError={(error) => reportRuntimeError(String(error?.message || error), "", "boundary")}>
+          <PlayerScreen
+            config={safeConfig}
+            mediaVersion={mediaVersion}
+            uploadProcessingBySection={uploadProcessingBySection}
+            onPlaybackChange={handlePlaybackChange}
+            onPlaybackError={handlePlaybackError}
+          />
+        </PlayerErrorBoundary>
         <AdminButton onOpen={() => setShowAdmin(true)} />
         <AdminPanel visible={showAdmin} onClose={() => setShowAdmin(false)} />
       </View>
+      {lastError ? (
+        <View style={styles.errorToast}>
+          <Text style={styles.errorToastTitle}>Error</Text>
+          <Text style={styles.errorToastMsg}>{lastError.message}</Text>
+          {lastError.detail ? (
+            <Text style={styles.errorToastDetail}>{lastError.detail}</Text>
+          ) : null}
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -1219,5 +1348,52 @@ const styles = StyleSheet.create({
     color: "rgba(206, 229, 245, 0.86)",
     fontSize: 13,
     lineHeight: 18,
+  },
+  errorToast: {
+    position: "absolute",
+    left: 16,
+    right: 16,
+    top: 16,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderRadius: 12,
+    backgroundColor: "rgba(120, 16, 26, 0.9)",
+    borderWidth: 1,
+    borderColor: "rgba(255, 140, 140, 0.45)",
+  },
+  errorToastTitle: {
+    color: "#ffd9d9",
+    fontSize: 14,
+    fontWeight: "700",
+    marginBottom: 4,
+  },
+  errorToastMsg: {
+    color: "#ffecec",
+    fontSize: 13,
+  },
+  errorToastDetail: {
+    color: "#f8caca",
+    fontSize: 12,
+    marginTop: 4,
+  },
+  errorBoundaryWrap: {
+    flex: 1,
+    backgroundColor: "#0b0f14",
+    justifyContent: "center",
+    alignItems: "center",
+    paddingHorizontal: 24,
+  },
+  errorBoundaryTitle: {
+    color: "#ffffff",
+    fontSize: 26,
+    fontWeight: "700",
+    marginBottom: 8,
+    textAlign: "center",
+  },
+  errorBoundaryText: {
+    color: "rgba(220, 230, 240, 0.9)",
+    fontSize: 16,
+    lineHeight: 24,
+    textAlign: "center",
   },
 });

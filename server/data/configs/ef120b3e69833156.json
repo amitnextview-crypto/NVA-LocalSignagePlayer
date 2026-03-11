@@ -3,34 +3,34 @@
   "layout": "grid3",
   "grid3Layout": "stack-h",
   "gridRatio": "1:1:1",
-  "slideDuration": 1,
+  "slideDuration": 10,
   "animation": "slide",
   "bgColor": "#000000",
   "sections": [
     {
       "slideDirection": "top",
-      "slideDuration": 1,
-      "sourceType": "multimedia",
-      "sourceUrl": ""
-    },
-    {
-      "slideDirection": "right",
       "slideDuration": 10,
       "sourceType": "multimedia",
       "sourceUrl": ""
     },
     {
+      "slideDirection": "top",
+      "slideDuration": 5,
+      "sourceType": "multimedia",
+      "sourceUrl": ""
+    },
+    {
       "slideDirection": "bottom",
-      "slideDuration": 4,
+      "slideDuration": 8,
       "sourceType": "multimedia",
       "sourceUrl": ""
     }
   ],
   "ticker": {
-    "text": "welcome to nextview technologies",
+    "text": "welcome to nextview technologies india",
     "color": "#ffffff",
-    "bgColor": "#05637a",
-    "speed": 7,
+    "bgColor": "#01b6da",
+    "speed": 10,
     "fontSize": 44,
     "position": "bottom"
   },

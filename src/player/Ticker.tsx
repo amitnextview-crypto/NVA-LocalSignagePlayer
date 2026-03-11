@@ -39,14 +39,10 @@ export default function Ticker({ ticker }: any) {
   return (
     <View
       style={{
-        position: "absolute",
-        left: 0,
-        right: 0,
-        [ticker.position === "top" ? "top" : "bottom"]: 0,
         backgroundColor: ticker.bgColor || "#000",
         overflow: "hidden",
         paddingVertical: 6,
-        justifyContent: "center"
+        justifyContent: "center",
       }}
     >
       <Animated.Text

@@ -10,6 +10,10 @@ const GRID3_LAYOUTS = [
   { id: "top-two-bottom-one", label: "Top 2 / Bottom 1" },
   { id: "top-one-bottom-two", label: "Top 1 / Bottom 2" },
 ];
+const GRID2_LAYOUTS = [
+  { id: "stack-h", label: "Horizontal Split" },
+  { id: "stack-v", label: "Vertical Split" },
+];
 
 const SECTION_SOURCE_TYPES = {
   multimedia: "multimedia",
@@ -630,6 +634,13 @@ function miniLayoutMarkup(layout, grid3Layout) {
 
   if (layout === "grid2") {
     const [a, b] = normalizeRatio(selectedGridRatio, 2);
+    if (grid3Layout === "stack-v") {
+      return `
+        <div style="height:100%;display:grid;grid-template-rows:${a}fr ${b}fr">
+          <div class="cell">1</div><div class="cell">2</div>
+        </div>
+      `;
+    }
     return `
       <div style="height:100%;display:grid;grid-template-columns:${a}fr ${b}fr">
         <div class="cell">1</div><div class="cell">2</div>
@@ -687,6 +698,14 @@ function liveLayoutMarkup(layout, grid3Layout) {
 
   if (layout === "grid2") {
     const [left, right] = normalizeRatio(selectedGridRatio, 2);
+    if (grid3Layout === "stack-v") {
+      return `
+        <div class="preview-layout" style="display:grid;grid-template-rows:${left}fr ${right}fr;">
+          <div class="preview-slot" data-section="1"></div>
+          <div class="preview-slot" data-section="2"></div>
+        </div>
+      `;
+    }
     return `
       <div class="preview-layout" style="display:grid;grid-template-columns:${left}fr ${right}fr;">
         <div class="preview-slot" data-section="1"></div>
@@ -763,6 +782,114 @@ function resetPreviewState() {
   };
 }
 
+function getSelectedDeviceStatus() {
+  const selectedDevice = document.getElementById("deviceSelect")?.value || "all";
+  if (selectedDevice === "all") return null;
+  return latestDeviceStatusList.find((entry) => entry.deviceId === selectedDevice) || null;
+}
+
+function getLivePlaybackForSection(sectionNumber, status) {
+  if (!status?.meta?.currentPlaybackBySection) return null;
+  return status.meta.currentPlaybackBySection[sectionNumber] || null;
+}
+
+function findLiveFile(files, liveSection) {
+  if (!liveSection || !Array.isArray(files)) return null;
+  const title = String(liveSection.title || "").trim();
+  if (!title) return null;
+  return (
+    files.find((file) => {
+      const candidates = [
+        file.originalName,
+        file.name,
+        file.url,
+        file.remoteUrl,
+      ];
+      return candidates.some((value) => String(value || "") === title);
+    }) || null
+  );
+}
+
+function renderPreviewEmpty(slot, title, subtitle, hint, badgeText = "UPLOAD REQUIRED") {
+  const card = document.createElement("div");
+  card.className = "preview-empty-card";
+
+  const badge = document.createElement("div");
+  badge.className = "preview-empty-badge";
+  badge.textContent = String(badgeText || "UPLOAD REQUIRED");
+
+  const titleEl = document.createElement("div");
+  titleEl.className = "preview-empty-title";
+  titleEl.textContent = String(title || "No Media");
+
+  const subEl = document.createElement("div");
+  subEl.className = "preview-empty-subtitle";
+  subEl.textContent = String(subtitle || "");
+
+  const hintEl = document.createElement("div");
+  hintEl.className = "preview-empty-hint";
+  hintEl.textContent = String(hint || "");
+
+  card.appendChild(badge);
+  card.appendChild(titleEl);
+  if (subtitle) card.appendChild(subEl);
+  if (hint) card.appendChild(hintEl);
+  slot.appendChild(card);
+}
+
+function normalizePreviewCacheStatus(status, rawStatus) {
+  const base = String(rawStatus || "").trim().toLowerCase();
+  if (base === "cached" || base === "streaming") return base;
+  if (!status) return "";
+  if (base === "offline") return "cached";
+  if (base === "empty" || !base) return status.online ? "streaming" : "cached";
+  return base;
+}
+
+function applyPreviewLiveOverlay(slot, status, sectionNumber, cacheStatusOverride = "") {
+  if (!status) return;
+  const liveSection = getLivePlaybackForSection(sectionNumber, status);
+  const cacheStatus = normalizePreviewCacheStatus(
+    status,
+    cacheStatusOverride || liveSection?.cacheStatus || ""
+  );
+
+  const badge = document.createElement("div");
+  badge.className = `preview-live-badge ${status.online ? "online" : "offline"}`;
+  badge.textContent = status.online ? "LIVE" : "OFFLINE";
+  slot.appendChild(badge);
+
+  if (cacheStatus && cacheStatus !== "live") {
+    const cacheBadge = document.createElement("div");
+    cacheBadge.className = `preview-cache-badge ${cacheStatus}`;
+    cacheBadge.textContent = cacheStatus.toUpperCase();
+    slot.appendChild(cacheBadge);
+  }
+
+  const panel = document.createElement("div");
+  panel.className = "preview-live-panel";
+  const lines = [];
+
+  if (!status.online) {
+    lines.push("Device offline");
+  } else if (liveSection?.title) {
+    lines.push(`Now: ${liveSection.title}`);
+  } else {
+    lines.push("No media playing");
+  }
+
+  if (status.lastError) {
+    lines.push(`Error: ${status.lastError}`);
+  }
+
+  if (cacheStatus && cacheStatus !== "live") {
+    lines.push(`Mode: ${cacheStatus.toUpperCase()}`);
+  }
+
+  panel.textContent = lines.join("\n");
+  slot.appendChild(panel);
+}
+
 function renderSectionSlot(slot, sectionNumber, config) {
   const sectionConfig = config?.sections?.[sectionNumber - 1] || {};
   const sourceType = sectionConfig.sourceType || SECTION_SOURCE_TYPES.multimedia;
@@ -770,6 +897,16 @@ function renderSectionSlot(slot, sectionNumber, config) {
 
   const files = previewMediaBySection[sectionNumber] || [];
   const state = previewSectionState[sectionNumber];
+  const selectedStatus = getSelectedDeviceStatus();
+  const liveSection = getLivePlaybackForSection(sectionNumber, selectedStatus);
+  const fallbackCacheStatus = !selectedStatus
+    ? ""
+    : liveSection?.cacheStatus
+    ? String(liveSection.cacheStatus)
+    : selectedStatus.online
+    ? "Empty"
+    : "Offline";
+  const liveMode = !!selectedStatus?.online && !!liveSection;
 
   if (state.timer) {
     clearTimeout(state.timer);
@@ -784,7 +921,7 @@ function renderSectionSlot(slot, sectionNumber, config) {
 
   if (sourceType === SECTION_SOURCE_TYPES.web || sourceType === SECTION_SOURCE_TYPES.youtube) {
     if (!sourceUrl) {
-      slot.innerHTML += `<div class="cell">No URL</div>`;
+      applyPreviewLiveOverlay(slot, selectedStatus, sectionNumber, fallbackCacheStatus);
       return;
     }
 
@@ -796,15 +933,22 @@ function renderSectionSlot(slot, sectionNumber, config) {
     frame.setAttribute("referrerpolicy", "strict-origin-when-cross-origin");
     frame.style.border = "0";
     slot.appendChild(frame);
+    applyPreviewLiveOverlay(slot, selectedStatus, sectionNumber, fallbackCacheStatus);
     return;
   }
 
   if (!files.length) {
-    slot.innerHTML += `<div class="cell">No Media</div>`;
+    applyPreviewLiveOverlay(slot, selectedStatus, sectionNumber, fallbackCacheStatus);
     return;
   }
 
-  const file = files[state.index % files.length];
+  const liveFile = liveMode ? findLiveFile(files, liveSection) : null;
+  if (liveMode && !liveFile) {
+    applyPreviewLiveOverlay(slot, selectedStatus, sectionNumber, fallbackCacheStatus);
+    return;
+  }
+
+  const file = liveFile || files[state.index % files.length];
   const isVideo = /\.(mp4|mkv|webm)$/i.test(file.name || "");
   const isText = (file.type || "").toLowerCase() === "text" || /\.txt$/i.test(file.originalName || file.name || "");
   const isPdf = (file.type || "").toLowerCase() === "pdf" || /\.pdf$/i.test(file.originalName || file.name || "");
@@ -817,11 +961,14 @@ function renderSectionSlot(slot, sectionNumber, config) {
     frame.style.border = "0";
     slot.appendChild(frame);
 
-    const durationMs = getSectionDurationMs(config, sectionNumber);
-    state.timer = setTimeout(() => {
-      state.index = (state.index + 1) % files.length;
-      renderSectionSlot(slot, sectionNumber, config);
-    }, durationMs);
+    if (!liveMode) {
+      const durationMs = getSectionDurationMs(config, sectionNumber);
+      state.timer = setTimeout(() => {
+        state.index = (state.index + 1) % files.length;
+        renderSectionSlot(slot, sectionNumber, config);
+      }, durationMs);
+    }
+    applyPreviewLiveOverlay(slot, selectedStatus, sectionNumber, fallbackCacheStatus);
     return;
   }
 
@@ -844,11 +991,14 @@ function renderSectionSlot(slot, sectionNumber, config) {
         panel.textContent = "Unable to load text file";
       });
 
-    const durationMs = getSectionDurationMs(config, sectionNumber);
-    state.timer = setTimeout(() => {
-      state.index = (state.index + 1) % files.length;
-      renderSectionSlot(slot, sectionNumber, config);
-    }, durationMs);
+    if (!liveMode) {
+      const durationMs = getSectionDurationMs(config, sectionNumber);
+      state.timer = setTimeout(() => {
+        state.index = (state.index + 1) % files.length;
+        renderSectionSlot(slot, sectionNumber, config);
+      }, durationMs);
+    }
+    applyPreviewLiveOverlay(slot, selectedStatus, sectionNumber, fallbackCacheStatus);
     return;
   }
 
@@ -862,27 +1012,33 @@ function renderSectionSlot(slot, sectionNumber, config) {
     mediaEl.autoplay = true;
     mediaEl.playsInline = true;
     mediaEl.preload = "metadata";
+    if (liveMode) mediaEl.loop = true;
 
-    mediaEl.onended = () => {
-      state.index = (state.index + 1) % files.length;
-      renderSectionSlot(slot, sectionNumber, config);
-    };
+    if (!liveMode) {
+      mediaEl.onended = () => {
+        state.index = (state.index + 1) % files.length;
+        renderSectionSlot(slot, sectionNumber, config);
+      };
 
-    mediaEl.onerror = () => {
+      mediaEl.onerror = () => {
+        state.timer = setTimeout(() => {
+          state.index = (state.index + 1) % files.length;
+          renderSectionSlot(slot, sectionNumber, config);
+        }, 1500);
+      };
+    }
+  } else {
+    if (!liveMode) {
+      const durationMs = getSectionDurationMs(config, sectionNumber);
       state.timer = setTimeout(() => {
         state.index = (state.index + 1) % files.length;
         renderSectionSlot(slot, sectionNumber, config);
-      }, 1500);
-    };
-  } else {
-    const durationMs = getSectionDurationMs(config, sectionNumber);
-    state.timer = setTimeout(() => {
-      state.index = (state.index + 1) % files.length;
-      renderSectionSlot(slot, sectionNumber, config);
-    }, durationMs);
+      }, durationMs);
+    }
   }
 
   slot.appendChild(mediaEl);
+  applyPreviewLiveOverlay(slot, selectedStatus, sectionNumber, fallbackCacheStatus);
 }
 
 function startLivePreviewPlayback(config) {
@@ -899,8 +1055,44 @@ function startLivePreviewPlayback(config) {
 
 function renderGrid3LayoutOptions() {
   const box = document.getElementById("grid3LayoutOptions");
-  if (!box) return;
+  const title = document.getElementById("gridLayoutTitle");
+  const layout = document.getElementById("layout")?.value || "fullscreen";
+  const layoutSection = document.getElementById("grid3LayoutSection");
 
+  if (!box || !layoutSection) return;
+
+  if (layout !== "grid2" && layout !== "grid3") {
+    layoutSection.classList.add("hidden");
+    return;
+  }
+
+  layoutSection.classList.remove("hidden");
+  if (title) {
+    title.textContent = layout === "grid2" ? "Grid 2 Layout Options" : "Grid 3 Layout Options";
+  }
+
+  if (layout === "grid2") {
+    const validIds = GRID2_LAYOUTS.map((item) => item.id);
+    if (!validIds.includes(selectedGrid3Layout)) {
+      selectedGrid3Layout = "stack-h";
+    }
+    box.innerHTML = GRID2_LAYOUTS.map((item) => {
+      const active = item.id === selectedGrid3Layout ? "active" : "";
+      const mini = miniLayoutMarkup("grid2", item.id);
+      return `
+        <button class="layout-option ${active}" onclick="selectGrid3Layout('${item.id}')" type="button">
+          <strong>${item.label}</strong>
+          <div class="mini-layout">${mini}</div>
+        </button>
+      `;
+    }).join("");
+    return;
+  }
+
+  const validIds = GRID3_LAYOUTS.map((item) => item.id);
+  if (!validIds.includes(selectedGrid3Layout)) {
+    selectedGrid3Layout = "stack-v";
+  }
   box.innerHTML = GRID3_LAYOUTS.map((item) => {
     const active = item.id === selectedGrid3Layout ? "active" : "";
     const mini = miniLayoutMarkup("grid3", item.id);
@@ -1010,8 +1202,10 @@ function updateSectionVisibility() {
   s1.style.display = "block";
   s2.style.display = layout === "fullscreen" ? "none" : "block";
   s3.style.display = layout === "grid3" ? "block" : "none";
-  grid3LayoutSection.classList.toggle("hidden", layout !== "grid3");
+  grid3LayoutSection.classList.toggle("hidden", layout !== "grid3" && layout !== "grid2");
 
+  // Ensure layout options normalize selectedGrid3Layout before preview render.
+  renderGrid3LayoutOptions();
   renderScreenPreview();
 }
 
@@ -1297,6 +1491,7 @@ async function loadDeviceAlerts() {
     showApkUpdateSuccessNotices(latestDeviceStatusList);
     renderHealthSummary(latestDeviceStatusList);
     renderDeviceAlerts(latestDeviceStatusList);
+    renderScreenPreview();
   } catch (_e) {
     const box = document.getElementById("deviceAlertsList");
     if (box) {
@@ -1304,6 +1499,7 @@ async function loadDeviceAlerts() {
     }
     window.__latestDeviceStatusList = [];
     renderHealthSummary([]);
+    renderScreenPreview();
   }
 }
 

@@ -18,7 +18,10 @@ import com.google.android.exoplayer2.ExoPlayer;
 import com.google.android.exoplayer2.MediaItem;
 import com.google.android.exoplayer2.PlaybackException;
 import com.google.android.exoplayer2.Player;
+import com.google.android.exoplayer2.C;
+import com.google.android.exoplayer2.DefaultRenderersFactory;
 import com.google.android.exoplayer2.source.DefaultMediaSourceFactory;
+import com.google.android.exoplayer2.upstream.DefaultDataSource;
 import com.google.android.exoplayer2.upstream.DefaultHttpDataSource;
 import com.google.android.exoplayer2.ui.AspectRatioFrameLayout;
 import com.google.android.exoplayer2.ui.StyledPlayerView;
@@ -43,6 +46,7 @@ public class NativeVideoPlayerView extends FrameLayout implements LifecycleEvent
             ViewGroup.LayoutParams.MATCH_PARENT,
             ViewGroup.LayoutParams.MATCH_PARENT
         ));
+        this.playerView.setKeepScreenOn(true);
         applyResizeMode();
         applyRotation();
         reactContext.addLifecycleEventListener(this);
@@ -84,25 +88,32 @@ public class NativeVideoPlayerView extends FrameLayout implements LifecycleEvent
 
         DefaultLoadControl loadControl = new DefaultLoadControl.Builder()
                 .setBufferDurationsMs(
-                        5000,
-                        30000,
-                        2000,
+                        15000,
+                        90000,
+                        2500,
                         5000
                 )
+                .setTargetBufferBytes(C.LENGTH_UNSET)
+                .setPrioritizeTimeOverSizeThresholds(true)
                 .build();
 
         DefaultHttpDataSource.Factory httpFactory = new DefaultHttpDataSource.Factory()
                 .setAllowCrossProtocolRedirects(true)
                 .setConnectTimeoutMs(15000)
                 .setReadTimeoutMs(30000);
+        DefaultDataSource.Factory dataSourceFactory = new DefaultDataSource.Factory(getContext(), httpFactory);
 
-        player = new ExoPlayer.Builder(getContext())
+        DefaultRenderersFactory renderersFactory = new DefaultRenderersFactory(getContext())
+                .setEnableDecoderFallback(true);
+
+        player = new ExoPlayer.Builder(getContext(), renderersFactory)
                 .setLoadControl(loadControl)
-                .setMediaSourceFactory(new DefaultMediaSourceFactory(httpFactory))
+                .setMediaSourceFactory(new DefaultMediaSourceFactory(dataSourceFactory))
                 .build();
         playerView.setPlayer(player);
         player.setVolume(muted ? 0f : 1f);
         player.setRepeatMode(repeat ? Player.REPEAT_MODE_ONE : Player.REPEAT_MODE_OFF);
+        player.setWakeMode(C.WAKE_MODE_NETWORK);
         player.addListener(new Player.Listener() {
             @Override
             public void onPlaybackStateChanged(int playbackState) {

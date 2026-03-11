@@ -39,7 +39,17 @@ app.use(express.json());
 app.use("/media-list", mediaRoutes);
 app.use("/upload", uploadRoutes);
 app.use("/config", configRoutes);
-app.use("/", express.static(path.join(assetBasePath, "public")));
+app.use(
+  "/",
+  express.static(path.join(assetBasePath, "public"), {
+    setHeaders: (res) => {
+      res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+      res.setHeader("Pragma", "no-cache");
+      res.setHeader("Expires", "0");
+      res.setHeader("Surrogate-Control", "no-store");
+    },
+  })
+);
 app.use(
   "/media",
   express.static(path.join(runtimeBasePath, "uploads"), {
@@ -121,6 +131,8 @@ io.on("connection", (socket) => {
   socket.on("device-health", (payload) => {
     const deviceId = String(payload?.deviceId || socketToDevice[socket.id] || "").trim();
     if (!deviceId) return;
+    connectedDevices[deviceId] = socket.id;
+    socketToDevice[socket.id] = deviceId;
     upsertDeviceStatus(deviceId, {
       online: true,
       appState: payload?.appState || null,
@@ -134,6 +146,8 @@ io.on("connection", (socket) => {
   socket.on("device-error", (payload) => {
     const deviceId = String(payload?.deviceId || socketToDevice[socket.id] || "").trim();
     if (!deviceId) return;
+    connectedDevices[deviceId] = socket.id;
+    socketToDevice[socket.id] = deviceId;
     upsertDeviceStatus(deviceId, {
       online: true,
       lastError: payload?.message || payload?.error || "Unknown device error",
