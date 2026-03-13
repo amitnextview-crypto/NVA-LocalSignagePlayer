@@ -52,6 +52,14 @@ const MAX_FILE_SIZE_BYTES = 5 * 1024 * 1024 * 1024; // 5 GB
 const MAX_FILES_PER_UPLOAD = 120;
 const DISABLE_UPLOAD_TRANSCODE = String(process.env.DISABLE_UPLOAD_TRANSCODE || "") === "1";
 const DIRECT_PLAY_VIDEO_EXTENSIONS = new Set([".mp4"]);
+const SAFE_DEVICE_RE = /^[a-zA-Z0-9_-]{1,64}$/;
+
+function sanitizeDeviceId(value) {
+  const id = String(value || "").trim();
+  if (id === "all") return id;
+  if (!SAFE_DEVICE_RE.test(id)) return "";
+  return id;
+}
 
 function emitSectionUploadStatus(deviceId, section, status, message = "") {
   if (!global.io) return;
@@ -532,7 +540,10 @@ async function optimizeVideosInDirectory(dirPath) {
 }
 
 router.post("/:deviceId/section/:section", (req, res) => {
-  const deviceId = req.params.deviceId;
+  const deviceId = sanitizeDeviceId(req.params.deviceId);
+  if (!deviceId) {
+    return res.status(400).json({ ok: false, error: "invalid-device-id" });
+  }
   const section = req.params.section;
 
   const uploadToken = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;

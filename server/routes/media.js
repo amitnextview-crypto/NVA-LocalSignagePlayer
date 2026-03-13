@@ -10,6 +10,14 @@ const BASE_DIR = process.pkg
   : path.join(__dirname, "../uploads");
 const ALLOWED_MEDIA_EXT = /\.(mp4|mkv|webm|jpg|jpeg|png|txt|pdf)$/i;
 const HASH_CACHE = new Map();
+const SAFE_DEVICE_RE = /^[a-zA-Z0-9_-]{1,64}$/;
+
+function sanitizeDeviceId(value) {
+  const id = String(value || "").trim();
+  if (id === "all") return id;
+  if (!SAFE_DEVICE_RE.test(id)) return "";
+  return id;
+}
 
 function estimatePdfPageCount(filePath) {
   try {
@@ -102,7 +110,7 @@ function readActiveSectionFiles(sectionBase) {
 }
 
 router.get("/", (req, res) => {
-  const deviceId = req.query.deviceId;
+  const deviceId = sanitizeDeviceId(req.query.deviceId);
 
   if (!deviceId) return res.json([]);
 

@@ -17,6 +17,14 @@ const FALLBACK_DIR = path.join(basePath, "uploads", "fallbacks");
 const UPDATE_DIR = path.join(basePath, "uploads", "updates");
 const DEFAULT_CONFIG_PATH = path.join(CONFIG_DIR, "default.json");
 const ASSET_DEFAULT_CONFIG_PATH = path.join(assetBasePath, "data", "configs", "default.json");
+const SAFE_DEVICE_RE = /^[a-zA-Z0-9_-]{1,64}$/;
+
+function sanitizeDeviceId(value) {
+  const id = String(value || "").trim();
+  if (id === "all") return id;
+  if (!SAFE_DEVICE_RE.test(id)) return "";
+  return id;
+}
 
 const DEFAULT_CONFIG_TEMPLATE = {
   orientation: "horizontal",
@@ -129,7 +137,7 @@ router.get("/", (req, res) => {
   res.setHeader("Expires", "0");
   res.setHeader("Surrogate-Control", "no-store");
 
-  const deviceId = req.query.deviceId;
+  const deviceId = sanitizeDeviceId(req.query.deviceId);
   let filePath;
 
   if (deviceId) {
@@ -147,8 +155,12 @@ router.get("/", (req, res) => {
 
 router.post("/", (req, res) => {
   const { targetDevice, config } = req.body;
+  const safeTarget = sanitizeDeviceId(targetDevice);
+  if (!safeTarget) {
+    return res.status(400).json({ success: false, error: "invalid-device-id" });
+  }
 
-  if (targetDevice === "all") {
+  if (safeTarget === "all") {
     const defaultPath = DEFAULT_CONFIG_PATH;
     fs.writeFileSync(defaultPath, JSON.stringify(config, null, 2));
 
@@ -164,11 +176,11 @@ router.post("/", (req, res) => {
       global.io.emit("config-updated");
     }
   } else {
-    const devicePath = path.join(CONFIG_DIR, `${targetDevice}.json`);
+    const devicePath = path.join(CONFIG_DIR, `${safeTarget}.json`);
     fs.writeFileSync(devicePath, JSON.stringify(config, null, 2));
 
-    if (global.io && global.connectedDevices?.[targetDevice]) {
-      const socketId = global.connectedDevices[targetDevice];
+    if (global.io && global.connectedDevices?.[safeTarget]) {
+      const socketId = global.connectedDevices[safeTarget];
       global.io.to(socketId).emit("config-updated");
     }
   }
@@ -177,9 +189,12 @@ router.post("/", (req, res) => {
 });
 
 router.post("/clear-device", (req, res) => {
-  const { targetDevice } = req.body;
+  const safeTarget = sanitizeDeviceId(req.body?.targetDevice);
+  if (!safeTarget) {
+    return res.json({ success: false, error: "invalid-device-id" });
+  }
 
-  if (targetDevice === "all") {
+  if (safeTarget === "all") {
     if (global.io) {
       global.io.emit("clear-data");
       console.log("Clear data command sent to: all devices");
@@ -188,10 +203,10 @@ router.post("/clear-device", (req, res) => {
     return res.json({ success: false });
   }
 
-  if (global.io && global.connectedDevices?.[targetDevice]) {
-    const socketId = global.connectedDevices[targetDevice];
+  if (global.io && global.connectedDevices?.[safeTarget]) {
+    const socketId = global.connectedDevices[safeTarget];
     global.io.to(socketId).emit("clear-data");
-    console.log("Clear data command sent to:", targetDevice);
+    console.log("Clear data command sent to:", safeTarget);
     return res.json({ success: true });
   }
 
@@ -199,9 +214,12 @@ router.post("/clear-device", (req, res) => {
 });
 
 router.post("/restart-device", (req, res) => {
-  const { targetDevice } = req.body;
+  const safeTarget = sanitizeDeviceId(req.body?.targetDevice);
+  if (!safeTarget) {
+    return res.json({ success: false, error: "invalid-device-id" });
+  }
 
-  if (targetDevice === "all") {
+  if (safeTarget === "all") {
     if (global.io) {
       global.io.emit("restart-app");
       return res.json({ success: true });
@@ -209,10 +227,10 @@ router.post("/restart-device", (req, res) => {
     return res.json({ success: false });
   }
 
-  if (global.io && global.connectedDevices?.[targetDevice]) {
-    const socketId = global.connectedDevices[targetDevice];
+  if (global.io && global.connectedDevices?.[safeTarget]) {
+    const socketId = global.connectedDevices[safeTarget];
     global.io.to(socketId).emit("restart-app");
-    console.log("Restart command sent to:", targetDevice);
+    console.log("Restart command sent to:", safeTarget);
     return res.json({ success: true });
   }
 
@@ -220,9 +238,12 @@ router.post("/restart-device", (req, res) => {
 });
 
 router.post("/clear-cache", (req, res) => {
-  const { targetDevice } = req.body || {};
+  const safeTarget = sanitizeDeviceId(req.body?.targetDevice);
+  if (!safeTarget) {
+    return res.json({ success: false, error: "invalid-device-id" });
+  }
 
-  if (targetDevice === "all") {
+  if (safeTarget === "all") {
     if (global.io) {
       global.io.emit("clear-cache");
       console.log("Clear cache command sent to: all devices");
@@ -231,10 +252,10 @@ router.post("/clear-cache", (req, res) => {
     return res.json({ success: false });
   }
 
-  if (global.io && global.connectedDevices?.[targetDevice]) {
-    const socketId = global.connectedDevices[targetDevice];
+  if (global.io && global.connectedDevices?.[safeTarget]) {
+    const socketId = global.connectedDevices[safeTarget];
     global.io.to(socketId).emit("clear-cache");
-    console.log("Clear cache command sent to:", targetDevice);
+    console.log("Clear cache command sent to:", safeTarget);
     return res.json({ success: true });
   }
 
@@ -242,10 +263,14 @@ router.post("/clear-cache", (req, res) => {
 });
 
 router.post("/auto-reopen", (req, res) => {
-  const { targetDevice, enabled } = req.body || {};
+  const { enabled } = req.body || {};
+  const safeTarget = sanitizeDeviceId(req.body?.targetDevice);
+  if (!safeTarget) {
+    return res.json({ success: false, error: "invalid-device-id" });
+  }
   const flag = !!enabled;
 
-  if (targetDevice === "all") {
+  if (safeTarget === "all") {
     if (global.io) {
       global.io.emit("set-auto-reopen", { enabled: flag });
       return res.json({ success: true });
@@ -253,8 +278,8 @@ router.post("/auto-reopen", (req, res) => {
     return res.json({ success: false });
   }
 
-  if (global.io && global.connectedDevices?.[targetDevice]) {
-    const socketId = global.connectedDevices[targetDevice];
+  if (global.io && global.connectedDevices?.[safeTarget]) {
+    const socketId = global.connectedDevices[safeTarget];
     global.io.to(socketId).emit("set-auto-reopen", { enabled: flag });
     return res.json({ success: true });
   }
@@ -281,13 +306,17 @@ router.post("/upload-app-update", (req, res) => {
 });
 
 router.post("/install-app-update", (req, res) => {
-  const { targetDevice, apkUrl } = req.body || {};
+  const { apkUrl } = req.body || {};
+  const safeTarget = sanitizeDeviceId(req.body?.targetDevice);
+  if (!safeTarget) {
+    return res.json({ success: false, error: "invalid-device-id" });
+  }
   const safeApkUrl = String(apkUrl || "").trim();
   if (!safeApkUrl) {
     return res.status(400).json({ success: false, error: "APK URL missing" });
   }
 
-  if (targetDevice === "all") {
+  if (safeTarget === "all") {
     if (global.io) {
       global.io.emit("install-app-update", { apkUrl: safeApkUrl });
       return res.json({ success: true });
@@ -295,8 +324,8 @@ router.post("/install-app-update", (req, res) => {
     return res.json({ success: false });
   }
 
-  if (global.io && global.connectedDevices?.[targetDevice]) {
-    const socketId = global.connectedDevices[targetDevice];
+  if (global.io && global.connectedDevices?.[safeTarget]) {
+    const socketId = global.connectedDevices[safeTarget];
     global.io.to(socketId).emit("install-app-update", { apkUrl: safeApkUrl });
     return res.json({ success: true });
   }

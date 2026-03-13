@@ -1,8 +1,8 @@
 {
   "orientation": "horizontal",
   "layout": "grid3",
-  "grid3Layout": "stack-h",
-  "gridRatio": "1:1:1",
+  "grid3Layout": "top-two-bottom-one",
+  "gridRatio": "1:1",
   "slideDuration": 7,
   "animation": "slide",
   "bgColor": "#000000",
@@ -15,13 +15,13 @@
     },
     {
       "slideDirection": "top",
-      "slideDuration": 3,
+      "slideDuration": 5,
       "sourceType": "multimedia",
       "sourceUrl": ""
     },
     {
       "slideDirection": "bottom",
-      "slideDuration": 2,
+      "slideDuration": 3,
       "sourceType": "multimedia",
       "sourceUrl": ""
     }
