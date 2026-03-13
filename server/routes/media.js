@@ -9,6 +9,7 @@ const BASE_DIR = process.pkg
   ? path.join(global.runtimeBasePath || path.dirname(process.execPath), "uploads")
   : path.join(__dirname, "../uploads");
 const ALLOWED_MEDIA_EXT = /\.(mp4|mkv|webm|jpg|jpeg|png|txt|pdf)$/i;
+const HASH_CACHE = new Map();
 
 function estimatePdfPageCount(filePath) {
   try {
@@ -17,6 +18,20 @@ function estimatePdfPageCount(filePath) {
     return Math.max(1, matches ? matches.length : 1);
   } catch (_e) {
     return 1;
+  }
+}
+
+function getFileHash(fullPath, stat) {
+  try {
+    const cacheKey = `${fullPath}|${Number(stat?.mtimeMs || 0)}|${Number(stat?.size || 0)}`;
+    const cached = HASH_CACHE.get(cacheKey);
+    if (cached) return cached;
+    const data = fs.readFileSync(fullPath);
+    const hash = crypto.createHash("sha1").update(data).digest("hex");
+    HASH_CACHE.set(cacheKey, hash);
+    return hash;
+  } catch (_e) {
+    return "";
   }
 }
 
@@ -131,6 +146,7 @@ router.get("/", (req, res) => {
         .replace(/\\/g, "/");
       const baseUrl = `/media/${relative}`;
 
+      const hash = getFileHash(fullPath, stat);
       if (ext === ".pdf") {
         const pageCount = estimatePdfPageCount(fullPath);
         for (let page = 1; page <= pageCount; page++) {
@@ -144,6 +160,7 @@ router.get("/", (req, res) => {
             pageCount,
             size: stat.size,
             mtimeMs: Number(stat.mtimeMs || 0),
+            hash,
           });
         }
         continue;
@@ -156,6 +173,7 @@ router.get("/", (req, res) => {
         type: ext === ".txt" ? "text" : "media",
         size: stat.size,
         mtimeMs: Number(stat.mtimeMs || 0),
+        hash,
       });
     }
   }

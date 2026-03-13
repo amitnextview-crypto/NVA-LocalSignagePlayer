@@ -235,6 +235,80 @@ export default function App() {
     await Promise.allSettled(entries.map((entry) => RNFS.unlink(entry.path)));
   }
 
+  async function clearOldCachedMediaExceptActive() {
+    try {
+      const mediaPath = `${RNFS.DocumentDirectoryPath}/media`;
+      const manifestPath = `${mediaPath}/manifest.json`;
+      const listPath = `${mediaPath}/list-cache.json`;
+      const keepSet = new Set<string>();
+
+      if (await RNFS.exists(listPath)) {
+        try {
+          const rawList = await RNFS.readFile(listPath, "utf8");
+          const list = JSON.parse(rawList || "[]");
+          if (Array.isArray(list)) {
+            for (const item of list) {
+              if (!item || typeof item !== "object") continue;
+              const localPath = String(item.localPath || "").trim();
+              if (localPath) keepSet.add(localPath);
+            }
+          }
+        } catch {
+          // ignore
+        }
+      }
+
+      if (await RNFS.exists(manifestPath)) {
+        try {
+          const raw = await RNFS.readFile(manifestPath, "utf8");
+          const manifest = JSON.parse(raw || "{}");
+          if (manifest && typeof manifest === "object") {
+            for (const key of Object.keys(manifest)) {
+              const entry = manifest[key];
+              const localPath = String(entry?.localPath || "").trim();
+              if (localPath) keepSet.add(localPath);
+            }
+          }
+        } catch {
+          // ignore
+        }
+      }
+
+      const filesRoot = `${mediaPath}/files`;
+      if (!(await RNFS.exists(filesRoot))) return;
+      const entries = await RNFS.readDir(filesRoot);
+      let removedCount = 0;
+      let removedBytes = 0;
+      await Promise.allSettled(
+        entries.map(async (entry) => {
+          const fullPath = String(entry?.path || "");
+          if (!fullPath) return;
+          if (keepSet.has(fullPath)) return;
+          try {
+            removedBytes += Number(entry?.size || 0);
+            await RNFS.unlink(fullPath);
+            removedCount += 1;
+          } catch {
+            // ignore
+          }
+        })
+      );
+      if (removedCount > 0) {
+        console.log(
+          "Cache cleanup: removed",
+          removedCount,
+          "file(s),",
+          Math.round(removedBytes / (1024 * 1024)),
+          "MB"
+        );
+      } else {
+        console.log("Cache cleanup: no stale files to remove");
+      }
+    } catch {
+      // ignore cleanup errors
+    }
+  }
+
   useEffect(() => {
     let mounted = true;
     if (!ENABLE_AUTO_CLEAR_ON_BOOT) {
@@ -966,6 +1040,7 @@ export default function App() {
                 pruneStaleNow: true,
               });
               await clearRuntimeTransientCache();
+              await clearOldCachedMediaExceptActive();
               try {
                 const { DeviceIdModule: NativeDeviceModule } = NativeModules as any;
                 if (NativeDeviceModule?.clearVideoCache) {
@@ -1045,6 +1120,7 @@ export default function App() {
                     pruneStaleNow: true,
                   });
                   await clearRuntimeTransientCache();
+                  await clearOldCachedMediaExceptActive();
                   try {
                     const { DeviceIdModule: NativeDeviceModule } = NativeModules as any;
                     if (NativeDeviceModule?.clearVideoCache) {

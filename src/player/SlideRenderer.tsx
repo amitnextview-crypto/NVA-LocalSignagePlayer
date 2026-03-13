@@ -236,6 +236,7 @@ export default function SlideRenderer({
   const pinnedMediaUriRef = useRef<{ identity: string; uri: string } | null>(null);
   const pinnedContentIdentityRef = useRef<string>("");
   const lastGoodUriByIdentityRef = useRef<Record<string, string>>({});
+  const lastGoodAnyUriRef = useRef<string>("");
   const pdfSlotUrlsRef = useRef({ a: "", b: "" });
   const isMountedRef = useRef(true);
   const emptyFetchCountRef = useRef(0);
@@ -254,6 +255,7 @@ export default function SlideRenderer({
   const imageDesiredSlotRef = useRef<"a" | "b">("a");
   const cachePathSetRef = useRef<Set<string>>(new Set());
   const cacheRefreshDoneRef = useRef<Set<string>>(new Set());
+  const listPrefetchKeyRef = useRef<string>("");
   const lastIndexChangeAtRef = useRef(Date.now());
   const videoGateLoopRef = useRef(0);
   const prefetchKeyRef = useRef<string>("");
@@ -608,31 +610,45 @@ export default function SlideRenderer({
     let nextUri = "";
     if (holdForCache) {
       nextUri = "";
-    } else if (hasLocalPlayableUri) {
+    } else if (hasLocalPlayableUri && isListFullyCached) {
       nextUri = localPlayableUri;
     } else if (isLargeVideo && server && file?.url) {
       nextUri = buildRemoteMediaUri(server, file.url, file?.mtimeMs || mediaVersion);
     } else if (server && file?.url) {
       nextUri = buildRemoteMediaUri(server, file.url, file?.mtimeMs || mediaVersion);
     } else if (file.remoteUrl) {
-      nextUri = localPlayableUri;
+      nextUri = isListFullyCached ? localPlayableUri : buildRemoteMediaUri(server, file.url, file?.mtimeMs || mediaVersion);
     }
 
     if (!nextUri) {
       if (file?.remoteUrl) {
-        nextUri = normalizeMediaUri(String(file.remoteUrl || ""));
+        nextUri = isListFullyCached ? normalizeMediaUri(String(file.remoteUrl || "")) : buildRemoteMediaUri(server, file.url, file?.mtimeMs || mediaVersion);
       } else if (server && file?.url) {
         nextUri = buildRemoteMediaUri(server, file.url, file?.mtimeMs || mediaVersion);
       }
     }
 
+    // Two-phase switch: once full list is cached, prefer local and never fall back to remote.
+    if (isListFullyCached) {
+      const localUri = normalizeMediaUri(String(file?.remoteUrl || ""));
+      if (/^file:\/\//i.test(localUri)) {
+        nextUri = localUri;
+      } else {
+        nextUri = "";
+      }
+    }
+
     const pinned = pinnedMediaUriRef.current;
+    const hasLocalPlayableForNext =
+      /^file:\/\//i.test(normalizeMediaUri(String(file?.remoteUrl || ""))) ||
+      /^file:\/\//i.test(nextUri);
     if (
       isVideo &&
       pinned &&
       pinned.identity === identity &&
       /^https?:\/\//i.test(pinned.uri) &&
-      /^file:\/\//i.test(nextUri)
+      /^file:\/\//i.test(nextUri) &&
+      !hasLocalPlayableForNext
     ) {
       // Avoid switching from remote to local mid-playback (causes pause on some TVs).
       nextUri = pinned.uri;
@@ -658,7 +674,7 @@ export default function SlideRenderer({
       return;
     }
     if (!nextUri) {
-      const cachedUri = lastGoodUriByIdentityRef.current[contentIdentity];
+      const cachedUri = lastGoodUriByIdentityRef.current[contentIdentity] || lastGoodAnyUriRef.current;
       if (cachedUri) {
         setUri(cachedUri);
         return;
@@ -666,9 +682,10 @@ export default function SlideRenderer({
     }
     if (nextUri) {
       lastGoodUriByIdentityRef.current[contentIdentity] = nextUri;
+      lastGoodAnyUriRef.current = nextUri;
     }
     setUri(nextUri || "");
-  }, [files, index, server, sourceType, mediaVersion]);
+  }, [files, index, server, sourceType, mediaVersion, isListFullyCached]);
 
   useEffect(() => {
     if (sourceType !== SOURCE_TYPES.multimedia) {
@@ -821,6 +838,16 @@ export default function SlideRenderer({
 
   useEffect(() => {
     if (sourceType !== SOURCE_TYPES.multimedia) return;
+    if (!files.length) return;
+    const signature = buildListSignature(files);
+    if (!signature || signature === listPrefetchKeyRef.current) return;
+    listPrefetchKeyRef.current = signature;
+    // Staged cache: kick off background prefetch for the full playlist.
+    prefetchMediaItems(files);
+  }, [files, sourceType]);
+
+  useEffect(() => {
+    if (sourceType !== SOURCE_TYPES.multimedia) return;
     const paths = new Set<string>();
     const initial: Record<string, number> = {};
     files.forEach((file) => {
@@ -946,6 +973,27 @@ export default function SlideRenderer({
       }
     };
   }, [files, index, uri, sourceType, cacheProgress]);
+
+  useEffect(() => {
+    if (sourceType !== SOURCE_TYPES.multimedia) return;
+    if (!files.length) return;
+    if (!isListFullyCached) return;
+    // Automatic playlist switch to local once full cache is ready.
+    setForceLocalRestart(true);
+  }, [files, sourceType, isListFullyCached]);
+
+  useEffect(() => {
+    if (sourceType !== SOURCE_TYPES.multimedia) return;
+    if (!files.length) return;
+    const file = files[index];
+    if (!file || !isVideoFile(file)) return;
+    const localPlayableUri = normalizeMediaUri(String(file?.remoteUrl || ""));
+    const hasLocalPlayableUri = /^file:\/\//i.test(localPlayableUri);
+    const usingRemote = /^https?:\/\//i.test(uri);
+    if (hasLocalPlayableUri && usingRemote) {
+      setForceLocalRestart(true);
+    }
+  }, [files, index, uri, sourceType]);
 
   useEffect(() => {
     if (sourceType !== SOURCE_TYPES.multimedia) return;
@@ -1464,10 +1512,10 @@ export default function SlideRenderer({
     : server
     ? "Streaming"
     : "Offline";
+  const isListFullyCached = totalFiles > 0 && cachedCount >= totalFiles;
   const showCacheBadge = sourceType === SOURCE_TYPES.multimedia && !!cacheStatus;
   const showCacheProgress =
     cacheStatus === "Streaming" && streamingCount > 0 && aggregateProgress > 0 && aggregateProgress < 100;
-  const showLiveBadge = !!uri;
   const bufferingReason = (() => {
     if (!currentFile || sourceType !== SOURCE_TYPES.multimedia) return "";
     if (!server) return "CMS is offline — network unavailable.";
@@ -1505,17 +1553,12 @@ export default function SlideRenderer({
         },
       ]}
     >
-      {showLiveBadge ? (
-        <View style={styles.liveBadge}>
-          <Animated.View style={[styles.liveDot, { opacity: livePulse }]} />
-          <Text style={styles.liveText}>LIVE</Text>
-        </View>
-      ) : null}
       {showCacheBadge ? (
         <View
           style={[
             styles.cacheBadge,
             cacheStatus === "Offline" ? styles.cacheBadgeOffline : null,
+            cacheStatus === "Cached" ? styles.cacheBadgeCached : null,
           ]}
         >
           {cacheStatus === "Streaming" && showCacheProgress ? (
@@ -1527,11 +1570,21 @@ export default function SlideRenderer({
             />
           ) : null}
           <View style={styles.cacheBadgeContent}>
-            <Text style={styles.cacheBadgeText}>
-              {cacheStatus === "Streaming" && totalFiles
-                ? `Streaming ${cachedCount}/${totalFiles}`
-                : cacheStatus}
-            </Text>
+            {cacheStatus === "Cached" ? (
+              <Animated.View
+                style={[
+                  styles.cacheDot,
+                  isCached ? styles.cacheDotGreen : styles.cacheDotBlue,
+                  { opacity: livePulse },
+                ]}
+              />
+            ) : (
+              <Text style={styles.cacheBadgeText}>
+                {cacheStatus === "Streaming" && totalFiles
+                  ? `Streaming ${cachedCount}/${totalFiles}`
+                  : cacheStatus}
+              </Text>
+            )}
           </View>
         </View>
       ) : null}
@@ -1898,6 +1951,16 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(140, 20, 30, 0.45)",
     borderColor: "rgba(255, 160, 160, 0.35)",
   },
+  cacheBadgeCached: {
+    backgroundColor: "#000000",
+    borderColor: "#000000",
+    borderWidth: 0,
+    paddingHorizontal: 0,
+    paddingVertical: 0,
+    shadowOpacity: 0,
+    shadowRadius: 0,
+    elevation: 0,
+  },
   cacheBadgeProgress: {
     position: "absolute",
     left: 0,
@@ -1916,37 +1979,18 @@ const styles = StyleSheet.create({
     letterSpacing: 0.3,
     textTransform: "uppercase",
   },
-  liveBadge: {
-    position: "absolute",
-    top: 6,
-    left: 8,
-    paddingHorizontal: 5,
-    paddingVertical: 2,
-    borderRadius: 999,
-    backgroundColor: "rgba(10, 18, 24, 0.32)",
-    borderWidth: 1,
-    borderColor: "rgba(127, 255, 212, 0.18)",
-    zIndex: 6,
-    flexDirection: "row",
-    alignItems: "center",
-    shadowColor: "#000",
-    shadowOpacity: 0.12,
-    shadowRadius: 4,
-    elevation: 2,
-  },
-  liveDot: {
+  cacheDot: {
     width: 3,
     height: 3,
     borderRadius: 1.5,
-    backgroundColor: "rgba(91, 255, 212, 0.9)",
-    marginRight: 3,
+    marginVertical: 1,
+    alignSelf: "center",
   },
-  liveText: {
-    color: "rgba(234, 255, 248, 0.95)",
-    fontSize: 7,
-    fontWeight: "800",
-    letterSpacing: 0.3,
-    textTransform: "uppercase",
+  cacheDotBlue: {
+    backgroundColor: "rgba(90, 180, 255, 0.95)",
+  },
+  cacheDotGreen: {
+    backgroundColor: "rgba(80, 220, 120, 0.98)",
   },
   cacheProgressFill: {
     height: 3,

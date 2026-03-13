@@ -1,7 +1,7 @@
 {
   "orientation": "horizontal",
   "layout": "grid3",
-  "grid3Layout": "stack-v",
+  "grid3Layout": "stack-h",
   "gridRatio": "1:1:1",
   "slideDuration": 7,
   "animation": "slide",
@@ -15,13 +15,13 @@
     },
     {
       "slideDirection": "top",
-      "slideDuration": 13,
+      "slideDuration": 3,
       "sourceType": "multimedia",
       "sourceUrl": ""
     },
     {
       "slideDirection": "bottom",
-      "slideDuration": 19,
+      "slideDuration": 2,
       "sourceType": "multimedia",
       "sourceUrl": ""
     }

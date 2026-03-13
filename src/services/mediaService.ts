@@ -88,6 +88,7 @@ type MediaItem = {
   pageCount?: number;
   size?: number;
   mtimeMs?: number;
+  hash?: string;
   remoteUrl?: string;
   localPath?: string;
 };
@@ -97,6 +98,7 @@ type ManifestEntry = {
   localPath: string;
   size: number;
   mtimeMs: number;
+  hash?: string;
   lastSeenAt?: number;
 };
 
@@ -133,6 +135,7 @@ function mediaItemFingerprint(item: MediaItem): string {
     Number(item?.pageCount || 0),
     Number(item?.size || 0),
     Number(item?.mtimeMs || 0),
+    String(item?.hash || ""),
   ].join("|");
 }
 
@@ -267,17 +270,37 @@ function isExpectedValue(value: number): boolean {
   return Number.isFinite(value) && value > 0;
 }
 
+async function computeFileHash(path: string): Promise<string> {
+  try {
+    const hashFn = (RNFS as any)?.hash;
+    if (typeof hashFn === "function") {
+      const value = await hashFn(path, "sha1");
+      return String(value || "");
+    }
+  } catch {
+    // ignore
+  }
+  return "";
+}
+
 async function isManifestEntryUsable(
   entry: ManifestEntry | undefined,
   expectedSize: number,
-  expectedMtime: number
+  expectedMtime: number,
+  expectedHash: string
 ): Promise<boolean> {
   if (!entry?.localPath) return false;
   if (!(await fileExists(entry.localPath))) return false;
 
   const sizeExpected = isExpectedValue(expectedSize);
   const mtimeExpected = isExpectedValue(expectedMtime);
+  const hashExpected = String(expectedHash || "").trim();
   if (!sizeExpected && !mtimeExpected) {
+    if (hashExpected) {
+      const actualHash = await computeFileHash(entry.localPath);
+      if (!actualHash || actualHash !== hashExpected) return false;
+      entry.hash = hashExpected;
+    }
     entry.lastSeenAt = Date.now();
     return true;
   }
@@ -287,9 +310,15 @@ async function isManifestEntryUsable(
     const size = Number(stat?.size || 0);
     const sizeOk = !sizeExpected || size === expectedSize;
     const mtimeOk = !mtimeExpected || Number(entry.mtimeMs || 0) === expectedMtime;
-    if (sizeOk && mtimeOk) {
+    let hashOk = true;
+    if (hashExpected) {
+      const actualHash = await computeFileHash(entry.localPath);
+      hashOk = !!actualHash && actualHash === hashExpected;
+    }
+    if (sizeOk && mtimeOk && hashOk) {
       if (sizeExpected && entry.size !== expectedSize) entry.size = expectedSize;
       if (mtimeExpected && entry.mtimeMs !== expectedMtime) entry.mtimeMs = expectedMtime;
+      if (hashExpected && entry.hash !== hashExpected) entry.hash = hashExpected;
       entry.lastSeenAt = Date.now();
       return true;
     }
@@ -312,9 +341,10 @@ async function downloadIfNeeded(
   const section = Number(item.section || 1);
   const expectedSize = Number(item.size || 0);
   const expectedMtime = Number(item.mtimeMs || 0);
+  const expectedHash = String(item.hash || "").trim();
   const entry = manifest[remotePath];
 
-  if (await isManifestEntryUsable(entry, expectedSize, expectedMtime)) {
+  if (await isManifestEntryUsable(entry, expectedSize, expectedMtime, expectedHash)) {
     return entry!.localPath;
   }
 
@@ -331,11 +361,18 @@ async function downloadIfNeeded(
       const stat = await RNFS.stat(targetPath);
       const size = Number(stat?.size || 0);
       if (!expectedSize || size === expectedSize) {
+        if (expectedHash) {
+          const actualHash = await computeFileHash(targetPath);
+          if (!actualHash || actualHash !== expectedHash) {
+            throw new Error("download-hash-mismatch");
+          }
+        }
         manifest[remotePath] = {
           url: remotePath,
           localPath: targetPath,
           size: expectedSize || size,
           mtimeMs: expectedMtime,
+          hash: expectedHash || undefined,
           lastSeenAt: Date.now(),
         };
         emitProgress(remotePath, {
@@ -378,11 +415,23 @@ async function downloadIfNeeded(
 
       const finalStat = await RNFS.stat(targetPath);
       const finalSize = Number(finalStat?.size || 0);
+      if (expectedHash) {
+        const actualHash = await computeFileHash(targetPath);
+        if (!actualHash || actualHash !== expectedHash) {
+          try {
+            await RNFS.unlink(targetPath);
+          } catch {
+            // ignore
+          }
+          throw new Error("download-hash-mismatch");
+        }
+      }
       manifest[remotePath] = {
         url: remotePath,
         localPath: targetPath,
         size: expectedSize || finalSize,
         mtimeMs: expectedMtime,
+        hash: expectedHash || undefined,
         lastSeenAt: Date.now(),
       };
       emitProgress(remotePath, {
@@ -558,7 +607,8 @@ async function mapServerListToPlayable(
     if (existing) {
       const expectedSize = Number(item.size || 0);
       const expectedMtime = Number(item.mtimeMs || 0);
-      if (await isManifestEntryUsable(existing, expectedSize, expectedMtime)) {
+      const expectedHash = String(item.hash || "").trim();
+      if (await isManifestEntryUsable(existing, expectedSize, expectedMtime, expectedHash)) {
         resolvedByUrl[path] = existing.localPath;
         continue;
       }
