@@ -20,7 +20,7 @@ class KioskKeepAliveService : Service() {
     private const val CHANNEL_ID = "signage_keepalive_channel"
     private const val CHANNEL_NAME = "Signage Keep Alive"
     private const val NOTIF_ID = 4401
-    private const val WATCHDOG_INTERVAL_MS = 10000L
+    private const val WATCHDOG_INTERVAL_MS = 3000L
     private const val REOPEN_REQ_CODE = 7202
     private const val PREFS_NAME = "kiosk_prefs"
     private const val KEY_AUTO_REOPEN_ENABLED = "auto_reopen_enabled"
@@ -30,8 +30,12 @@ class KioskKeepAliveService : Service() {
   private val watchdog = object : Runnable {
     override fun run() {
       try {
-        if (isAutoReopenEnabled() && !isAppInForeground()) {
-          tryLaunchApp()
+        if (isAutoReopenEnabled()) {
+          if (!isAppInForeground()) {
+            tryLaunchApp()
+          }
+          // Always schedule a backup reopen alarm to recover from task kills.
+          scheduleReopen()
         }
       } catch (_: Exception) {
       } finally {
@@ -42,11 +46,22 @@ class KioskKeepAliveService : Service() {
 
   override fun onCreate() {
     super.onCreate()
+    // Force-enable auto reopen for kiosk behavior.
+    try {
+      val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+      prefs.edit().putBoolean(KEY_AUTO_REOPEN_ENABLED, true).apply()
+    } catch (_: Exception) {
+    }
     startInForeground()
     startWatchdog()
   }
 
   override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+    try {
+      val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+      prefs.edit().putBoolean(KEY_AUTO_REOPEN_ENABLED, true).apply()
+    } catch (_: Exception) {
+    }
     startInForeground()
     startWatchdog()
     return START_STICKY

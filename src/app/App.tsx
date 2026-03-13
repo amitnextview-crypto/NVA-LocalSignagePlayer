@@ -831,8 +831,8 @@ export default function App() {
             );
             setReady(true);
           } else {
-            setConnectTexts("CMS not found. Waiting for server", "Reconnecting...");
-            setReady(false);
+            setConnectTexts("CMS not found. Showing empty player", "Offline");
+            setReady(true);
           }
         }
         scheduleInitRetry();
@@ -1293,6 +1293,9 @@ export default function App() {
   const safeConfig = config || {
     orientation: "horizontal",
     bgColor: "#000",
+    layout: "fullscreen",
+    slideDuration: 5,
+    sections: [{ sourceType: "multimedia" }],
   };
 
   const handlePlaybackChange = (payload: any) => {

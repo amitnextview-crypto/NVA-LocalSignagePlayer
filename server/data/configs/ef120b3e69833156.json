@@ -1,7 +1,7 @@
 {
   "orientation": "horizontal",
   "layout": "grid2",
-  "grid3Layout": "stack-v",
+  "grid3Layout": "stack-h",
   "gridRatio": "1:1",
   "slideDuration": 7,
   "animation": "slide",

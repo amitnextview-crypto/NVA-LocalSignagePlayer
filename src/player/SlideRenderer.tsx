@@ -132,6 +132,13 @@ function getMediaStableIdentity(item: any) {
   ].join("|");
 }
 
+function getMediaCacheIdentity(item: any) {
+  return [
+    String(item?.localPath || ""),
+    String(item?.remoteUrl || ""),
+  ].join("|");
+}
+
 function buildListSignature(list: any[]) {
   if (!Array.isArray(list) || !list.length) return "empty";
   const first = getMediaStableIdentity(list[0]);
@@ -145,6 +152,9 @@ function areMediaListsEqual(a: any[], b: any[]) {
   if (a.length !== b.length) return false;
   for (let i = 0; i < a.length; i += 1) {
     if (getMediaStableIdentity(a[i]) !== getMediaStableIdentity(b[i])) {
+      return false;
+    }
+    if (getMediaCacheIdentity(a[i]) !== getMediaCacheIdentity(b[i])) {
       return false;
     }
   }
@@ -243,6 +253,7 @@ export default function SlideRenderer({
   const lastRestoreSignatureRef = useRef<string>("");
   const imageDesiredSlotRef = useRef<"a" | "b">("a");
   const cachePathSetRef = useRef<Set<string>>(new Set());
+  const cacheRefreshDoneRef = useRef<Set<string>>(new Set());
   const lastIndexChangeAtRef = useRef(Date.now());
   const videoGateLoopRef = useRef(0);
   const prefetchKeyRef = useRef<string>("");
@@ -822,6 +833,9 @@ export default function SlideRenderer({
       }
     });
     cachePathSetRef.current = paths;
+    cacheRefreshDoneRef.current = new Set(
+      Array.from(cacheRefreshDoneRef.current).filter((path) => paths.has(path))
+    );
     setCacheProgressByPath(initial);
 
     const unsubscribe = subscribeCacheProgress((path, progress) => {
@@ -837,6 +851,63 @@ export default function SlideRenderer({
       unsubscribe();
     };
   }, [files, sourceType]);
+
+  useEffect(() => {
+    if (sourceType !== SOURCE_TYPES.multimedia) return;
+    if (!files.length) return;
+    const active = files[index];
+    const pathKey = String(active?.url || "");
+    if (!pathKey) return;
+    if (cacheProgress < 100) return;
+    if (cacheRefreshDoneRef.current.has(pathKey)) return;
+
+    cacheRefreshDoneRef.current.add(pathKey);
+    let cancelled = false;
+    (async () => {
+      const MAX_RETRIES = 3;
+      const RETRY_DELAY_MS = 500;
+      for (let attempt = 0; attempt < MAX_RETRIES; attempt += 1) {
+        try {
+          const list = await getMediaFiles(sectionIndex);
+          if (cancelled || !isMountedRef.current) return;
+          if (Array.isArray(list) && list.length) {
+            setFiles((prev) => (areMediaListsEqual(prev, list) ? prev : list));
+            setIndex(findMatchingIndex(list, filesRef.current[indexRef.current], indexRef.current));
+            const activeItem = list.find(
+              (entry) =>
+                getMediaStableIdentity(entry) === getMediaStableIdentity(active)
+            );
+            if (activeItem) {
+              const localUri = normalizeMediaUri(String(activeItem?.remoteUrl || ""));
+              if (/^file:\/\//i.test(localUri) && localUri !== uri) {
+                const localPath = localUri.replace(/^file:\/\//i, "");
+                const exists = await RNFS.exists(localPath);
+                if (exists) {
+                  if (isVideoFile(activeItem)) {
+                    setUri(localUri);
+                    setVideoReloadToken((prev) => prev + 1);
+                  } else {
+                    setUri(localUri);
+                  }
+                  return;
+                }
+              } else if (localUri && localUri === uri) {
+                return;
+              }
+            }
+          }
+        } catch {
+          // ignore refresh failures
+        }
+        if (attempt < MAX_RETRIES - 1) {
+          await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS));
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [cacheProgress, files, index, sectionIndex, sourceType]);
 
   useEffect(() => {
     if (sourceType !== SOURCE_TYPES.multimedia) return;

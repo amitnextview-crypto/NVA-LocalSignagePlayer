@@ -263,6 +263,43 @@ function getDownloadKey(item: MediaItem): string {
   return `${String(item.url || "")}|${Number(item.size || 0)}|${Number(item.mtimeMs || 0)}`;
 }
 
+function isExpectedValue(value: number): boolean {
+  return Number.isFinite(value) && value > 0;
+}
+
+async function isManifestEntryUsable(
+  entry: ManifestEntry | undefined,
+  expectedSize: number,
+  expectedMtime: number
+): Promise<boolean> {
+  if (!entry?.localPath) return false;
+  if (!(await fileExists(entry.localPath))) return false;
+
+  const sizeExpected = isExpectedValue(expectedSize);
+  const mtimeExpected = isExpectedValue(expectedMtime);
+  if (!sizeExpected && !mtimeExpected) {
+    entry.lastSeenAt = Date.now();
+    return true;
+  }
+
+  try {
+    const stat = await RNFS.stat(entry.localPath);
+    const size = Number(stat?.size || 0);
+    const sizeOk = !sizeExpected || size === expectedSize;
+    const mtimeOk = !mtimeExpected || Number(entry.mtimeMs || 0) === expectedMtime;
+    if (sizeOk && mtimeOk) {
+      if (sizeExpected && entry.size !== expectedSize) entry.size = expectedSize;
+      if (mtimeExpected && entry.mtimeMs !== expectedMtime) entry.mtimeMs = expectedMtime;
+      entry.lastSeenAt = Date.now();
+      return true;
+    }
+  } catch {
+    // fallthrough
+  }
+
+  return false;
+}
+
 async function downloadIfNeeded(
   server: string,
   item: MediaItem,
@@ -277,11 +314,8 @@ async function downloadIfNeeded(
   const expectedMtime = Number(item.mtimeMs || 0);
   const entry = manifest[remotePath];
 
-  if (entry && (await fileExists(entry.localPath))) {
-    if (entry.size === expectedSize && entry.mtimeMs === expectedMtime) {
-      entry.lastSeenAt = Date.now();
-      return entry.localPath;
-    }
+  if (await isManifestEntryUsable(entry, expectedSize, expectedMtime)) {
+    return entry!.localPath;
   }
 
   const targetPath = localPathFor(remoteUrl, section, sourceName);
@@ -521,14 +555,13 @@ async function mapServerListToPlayable(
   const priorityVideoDownloads: Array<() => Promise<void>> = [];
   for (const [path, item] of uniqueByUrl.entries()) {
     const existing = manifest[path];
-    if (existing && (await fileExists(existing.localPath))) {
+    if (existing) {
       const expectedSize = Number(item.size || 0);
       const expectedMtime = Number(item.mtimeMs || 0);
-    if (existing.size === expectedSize && existing.mtimeMs === expectedMtime) {
-      existing.lastSeenAt = Date.now();
-      resolvedByUrl[path] = existing.localPath;
-      continue;
-    }
+      if (await isManifestEntryUsable(existing, expectedSize, expectedMtime)) {
+        resolvedByUrl[path] = existing.localPath;
+        continue;
+      }
     }
 
     // Keep playback immediate: use remote now, download cache in background.
