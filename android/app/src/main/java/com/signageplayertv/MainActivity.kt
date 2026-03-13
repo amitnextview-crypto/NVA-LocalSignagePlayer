@@ -21,7 +21,7 @@ import java.io.File
 class MainActivity : ReactActivity() {
 
   companion object {
-    private const val REOPEN_DELAY_MS = 3000L
+    private const val REOPEN_DELAY_MS = 10000L
     private const val REOPEN_REQ_CODE = 7201
     private const val PREFS_NAME = "kiosk_prefs"
     private const val KEY_AUTO_REOPEN_ENABLED = "auto_reopen_enabled"

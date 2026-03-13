@@ -2,6 +2,7 @@ const express = require("express");
 const multer = require("multer");
 const fs = require("fs");
 const path = require("path");
+const { execFile } = require("child_process");
 const { encodeVideo } = require("../services/videoEncoder");
 const { safeStat, safeReaddir, safeExistsDir, safeExists, wait } = require("../utils/fsSafe");
 
@@ -21,6 +22,12 @@ const ALLOWED_EXTENSIONS = new Set([
   ".png",
   ".txt",
   ".pdf",
+  ".ppt",
+  ".pptx",
+  ".pptm",
+  ".pps",
+  ".ppsx",
+  ".potx",
 ]);
 const ALLOWED_MIME_TYPES = new Set([
   "video/mp4",
@@ -31,8 +38,16 @@ const ALLOWED_MIME_TYPES = new Set([
   "text/plain",
   "application/pdf",
   "application/x-pdf",
+  "application/vnd.ms-powerpoint",
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  "application/vnd.ms-powerpoint.presentation.macroenabled.12",
+  "application/vnd.openxmlformats-officedocument.presentationml.slideshow",
+  "application/vnd.ms-powerpoint.slideshow.macroenabled.12",
+  "application/vnd.openxmlformats-officedocument.presentationml.template",
 ]);
 const VIDEO_EXTENSIONS = new Set([".mp4", ".mkv", ".webm"]);
+const PPT_EXTENSIONS = new Set([".ppt", ".pptx", ".pptm", ".pps", ".ppsx", ".potx"]);
+const PPT_MARKER_NAME = ".ppt_marker";
 const MAX_FILE_SIZE_BYTES = 5 * 1024 * 1024 * 1024; // 5 GB
 const MAX_FILES_PER_UPLOAD = 120;
 const DISABLE_UPLOAD_TRANSCODE = String(process.env.DISABLE_UPLOAD_TRANSCODE || "") === "1";
@@ -123,6 +138,12 @@ function extFromMime(mimeType) {
   if (mime === "image/png") return ".png";
   if (mime === "text/plain") return ".txt";
   if (mime === "application/pdf" || mime === "application/x-pdf") return ".pdf";
+  if (mime === "application/vnd.ms-powerpoint") return ".ppt";
+  if (mime === "application/vnd.openxmlformats-officedocument.presentationml.presentation") return ".pptx";
+  if (mime === "application/vnd.ms-powerpoint.presentation.macroenabled.12") return ".pptm";
+  if (mime === "application/vnd.openxmlformats-officedocument.presentationml.slideshow") return ".ppsx";
+  if (mime === "application/vnd.ms-powerpoint.slideshow.macroenabled.12") return ".pps";
+  if (mime === "application/vnd.openxmlformats-officedocument.presentationml.template") return ".potx";
   return "";
 }
 
@@ -140,6 +161,130 @@ function sanitizeFileName(file, req) {
 
   const count = req._nameCounter[key];
   return count === 1 ? `${safeBase}${safeExt}` : `${safeBase}-${count}${safeExt}`;
+}
+
+function findSofficeBinary() {
+  const envPath = String(process.env.LIBREOFFICE_PATH || process.env.SOFFICE_PATH || "").trim();
+  if (envPath && safeExists(envPath)) return envPath;
+  const candidates = [
+    "C:\\\\Program Files\\\\LibreOffice\\\\program\\\\soffice.exe",
+    "C:\\\\Program Files (x86)\\\\LibreOffice\\\\program\\\\soffice.exe",
+  ];
+  for (const candidate of candidates) {
+    if (safeExists(candidate)) return candidate;
+  }
+  return "soffice";
+}
+
+function safeBaseName(value) {
+  return String(value || "slides")
+    .replace(/[^a-zA-Z0-9._-]/g, "_")
+    .slice(0, 80);
+}
+
+async function execFileSafe(cmd, args, timeoutMs = 180000) {
+  await new Promise((resolve, reject) => {
+    execFile(cmd, args, { timeout: timeoutMs }, (err) => {
+      if (err) return reject(err);
+      return resolve();
+    });
+  });
+}
+
+function listPngsForBase(outputDir, base) {
+  const lowerBase = base.toLowerCase();
+  return safeReaddir(outputDir)
+    .filter((name) => name.toLowerCase().endsWith(".png"))
+    .filter((name) => name.toLowerCase().startsWith(lowerBase))
+    .sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" }));
+}
+
+async function convertPresentationToPdf(filePath, outputDir) {
+  const soffice = findSofficeBinary();
+  const args = [
+    "--headless",
+    "--nologo",
+    "--nolockcheck",
+    "--nodefault",
+    "--nofirststartwizard",
+    "--convert-to",
+    "pdf",
+    "--outdir",
+    outputDir,
+    filePath,
+  ];
+
+  await execFileSafe(soffice, args, 180000);
+
+  const base = path.parse(filePath).name;
+  const pdfPath = path.join(outputDir, `${base}.pdf`);
+  if (!safeExists(pdfPath)) {
+    throw new Error("ppt-convert-missing-pdf");
+  }
+  return pdfPath;
+}
+
+async function convertPdfToImages(pdfPath, outputDir, baseName) {
+  const outputBase = path.join(outputDir, `${baseName}_slide`);
+  // Try pdftoppm (Poppler) first - fast and reliable.
+  try {
+    await execFileSafe("pdftoppm", ["-png", "-r", "130", pdfPath, outputBase], 180000);
+    const pngs = listPngsForBase(outputDir, `${baseName}_slide`);
+    if (pngs.length) return pngs;
+  } catch {
+    // continue to next strategy
+  }
+
+  // Fallback: ImageMagick (magick) conversion.
+  try {
+    await execFileSafe(
+      "magick",
+      ["-density", "130", pdfPath, path.join(outputDir, `${baseName}_slide-%03d.png`)],
+      180000
+    );
+    const pngs = listPngsForBase(outputDir, `${baseName}_slide`);
+    if (pngs.length) return pngs;
+  } catch {
+    // continue to last strategy
+  }
+
+  // Last fallback: LibreOffice direct PNG export (may be single slide).
+  try {
+    const soffice = findSofficeBinary();
+    const args = [
+      "--headless",
+      "--nologo",
+      "--nolockcheck",
+      "--nodefault",
+      "--nofirststartwizard",
+      "--convert-to",
+      "png",
+      "--outdir",
+      outputDir,
+      pdfPath,
+    ];
+    await execFileSafe(soffice, args, 180000);
+    const pngs = listPngsForBase(outputDir, baseName);
+    if (pngs.length) return pngs;
+  } catch {
+    // ignore
+  }
+
+  return [];
+}
+
+async function convertPresentationToImages(filePath, outputDir) {
+  const pdfPath = await convertPresentationToPdf(filePath, outputDir);
+  const baseName = safeBaseName(path.parse(filePath).name);
+  const pngs = await convertPdfToImages(pdfPath, outputDir, baseName);
+  if (!pngs.length) {
+    throw new Error("ppt-convert-missing-images");
+  }
+  try {
+    await removePathWithRetry(pdfPath, { force: true }, 2, 120);
+  } catch {
+  }
+  return pngs;
 }
 
 function sectionPathFor(deviceId, sectionNumber) {
@@ -186,10 +331,20 @@ function directoryHasVideo(dirPath) {
   );
 }
 
-function otherSectionHasVideo(deviceId, currentSection) {
+function directoryHasPpt(dirPath) {
+  if (!safeExistsDir(dirPath)) return false;
+  const files = safeReaddir(dirPath);
+  if (files.includes(PPT_MARKER_NAME)) return true;
+  return files.some((name) =>
+    PPT_EXTENSIONS.has(path.extname(name).toLowerCase())
+  );
+}
+
+function anyOtherSectionHasVideoOrPpt(deviceId, currentSection) {
   for (let s = 1; s <= 3; s++) {
     if (String(s) === String(currentSection)) continue;
-    if (directoryHasVideo(resolveActiveSectionDir(deviceId, s))) return true;
+    const dir = resolveActiveSectionDir(deviceId, s);
+    if (directoryHasVideo(dir) || directoryHasPpt(dir)) return true;
   }
   return false;
 }
@@ -445,35 +600,73 @@ router.post("/:deviceId/section/:section", (req, res) => {
         const incomingFiles = safeExistsDir(tempSectionPath)
           ? safeReaddir(tempSectionPath)
           : [];
-        const incomingHasRawPdf = incomingFiles.some((name) =>
-          /\.pdf$/i.test(String(name || ""))
+        const presentationFiles = incomingFiles.filter((name) =>
+          /\.(ppt|pptx|pptm|pps|ppsx|potx)$/i.test(String(name || ""))
         );
-        if (incomingHasRawPdf) {
-          fs.rmSync(tempSectionPath, { recursive: true, force: true });
+        if (presentationFiles.length) {
           emitSectionUploadStatus(
             deviceId,
             section,
-            "error",
-            "PDF must be converted to image pages by CMS before upload."
+            "processing",
+            "Converting PowerPoint to images... Please wait."
           );
-          return res.status(400).json({
-            error:
-              "Raw PDF upload is not allowed. Upload PDF from the latest CMS page so it converts to page images first.",
-          });
+          try {
+            for (const fileName of presentationFiles) {
+              const fullPath = path.join(tempSectionPath, fileName);
+              await convertPresentationToImages(fullPath, tempSectionPath);
+              await removePathWithRetry(fullPath, { force: true }, 3, 120);
+            }
+          } catch (pptErr) {
+            fs.rmSync(tempSectionPath, { recursive: true, force: true });
+            emitSectionUploadStatus(
+              deviceId,
+              section,
+              "error",
+              "PowerPoint conversion failed. Install LibreOffice on CMS PC and retry."
+            );
+            return res.status(400).json({
+              error:
+                "PowerPoint conversion failed. Install LibreOffice on CMS PC (soffice) or set LIBREOFFICE_PATH, then retry.",
+            });
+          }
         }
         const incomingHasVideo = incomingFiles.some((name) =>
           VIDEO_EXTENSIONS.has(path.extname(name).toLowerCase())
         );
-        if (incomingHasVideo && otherSectionHasVideo(deviceId, section)) {
+        const incomingHasPpt =
+          String(req.body?.containsPpt || "").trim() === "1" ||
+          incomingFiles.some((name) =>
+            PPT_EXTENSIONS.has(path.extname(name).toLowerCase())
+          );
+        if (incomingHasPpt) {
+          try {
+            fs.writeFileSync(path.join(tempSectionPath, PPT_MARKER_NAME), "1", "utf8");
+          } catch {
+            // ignore marker write errors
+          }
+        }
+        if (incomingHasVideo && anyOtherSectionHasVideoOrPpt(deviceId, section)) {
           fs.rmSync(tempSectionPath, { recursive: true, force: true });
           emitSectionUploadStatus(
             deviceId,
             section,
             "error",
-            "Video allowed in only one section. Remove video from another section first."
+            "Video/PPT allowed in only one section. Remove PPT/video from all sections first."
           );
           return res.status(400).json({
-            error: "Video upload allowed in only one grid section. Remove video from other section first.",
+            error: "Video/PPT allowed in only one grid section. Remove PPT/video from all sections first.",
+          });
+        }
+        if (incomingHasPpt && anyOtherSectionHasVideoOrPpt(deviceId, section)) {
+          fs.rmSync(tempSectionPath, { recursive: true, force: true });
+          emitSectionUploadStatus(
+            deviceId,
+            section,
+            "error",
+            "PPT/video allowed in only one section. Remove PPT/video from all sections first."
+          );
+          return res.status(400).json({
+            error: "PPT/video allowed in only one grid section. Remove PPT/video from all sections first.",
           });
         }
 

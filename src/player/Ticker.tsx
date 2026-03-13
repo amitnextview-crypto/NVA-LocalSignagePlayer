@@ -1,11 +1,12 @@
 import React, { useEffect, useRef, useState } from "react";
-import { Animated, View, Dimensions, Text } from "react-native";
+import { Animated, View, Dimensions, Text, Easing } from "react-native";
 
 export default function Ticker({ ticker }: any) {
   const { width } = Dimensions.get("window");
 
   const translateX = useRef(new Animated.Value(width)).current;
   const [textWidth, setTextWidth] = useState(0);
+  const lastMeasuredRef = useRef(0);
 
   useEffect(() => {
     if (!ticker?.text) return;
@@ -24,6 +25,7 @@ export default function Ticker({ ticker }: any) {
       Animated.timing(translateX, {
         toValue: -textWidth,
         duration: duration,
+        easing: Easing.linear,
         useNativeDriver: true,
       })
     );
@@ -46,11 +48,30 @@ export default function Ticker({ ticker }: any) {
         justifyContent: "center",
       }}
     >
+      <Text
+        style={{
+          position: "absolute",
+          opacity: 0,
+          fontSize: ticker.fontSize || 24,
+          fontWeight: "800",
+          letterSpacing: 0.6,
+        }}
+        onTextLayout={(e) => {
+          const line = e?.nativeEvent?.lines?.[0];
+          const widthValue = Number(line?.width || 0);
+          if (!widthValue) return;
+          if (Math.abs(widthValue - lastMeasuredRef.current) < 1) return;
+          lastMeasuredRef.current = widthValue;
+          setTextWidth(widthValue);
+        }}
+      >
+        {ticker.text}
+      </Text>
       <Animated.Text
         numberOfLines={1}
-        onLayout={(e) => {
-          setTextWidth(e.nativeEvent.layout.width);
-        }}
+        ellipsizeMode="clip"
+        shouldRasterizeIOS
+        renderToHardwareTextureAndroid
         style={{
           transform: [{ translateX }],
           color: ticker.color || "#fff",

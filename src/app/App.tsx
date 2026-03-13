@@ -43,6 +43,9 @@ const NETWORK_QUALITY_SLOW_MS = 1800;
 const NETWORK_QUALITY_VERY_SLOW_MS = 3500;
 const SELF_HEAL_SYNC_INTERVAL_MS = 120000;
 const RECONNECT_RETRY_INTERVAL_MS = 10000;
+const ENABLE_AUTO_WIFI_RECOVERY = false;
+const ENABLE_NETWORK_RECOVERY_LOOP = false;
+const OFFLINE_NOTICE_POLL_MS = 3000;
 const AUTO_CLEAR_BOOT_MARKER_KEY = "auto_clear_boot_marker_v1";
 const AUTO_CLEAR_BOOT_LOOP_GUARD_MS = 20000;
 const ENABLE_AUTO_CLEAR_ON_BOOT = false;
@@ -141,6 +144,7 @@ export default function App() {
   const [licenseStatus, setLicenseStatus] = useState("Checking activation...");
   const [licenseBusy, setLicenseBusy] = useState(false);
   const [lastError, setLastError] = useState<RuntimeErrorInfo | null>(null);
+  const [offlineNotice, setOfflineNotice] = useState("");
   const [uploadProcessingBySection, setUploadProcessingBySection] = useState<
     Record<number, string>
   >({});
@@ -153,6 +157,7 @@ export default function App() {
   const lastMediaSyncAtRef = useRef("");
   const pendingApkUpdateSuccessRef = useRef<any | null>(null);
   const errorClearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const offlineNoticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const networkQualityRef = useRef("unknown");
   const playbackStatsRef = useRef({
     playbackChanges: 0,
@@ -220,6 +225,14 @@ export default function App() {
       const entries = await RNFS.readDir(cachePath);
       await Promise.allSettled(entries.map((entry) => RNFS.unlink(entry.path)));
     }
+  }
+
+  async function clearRuntimeTransientCache() {
+    const cachePath = RNFS.CachesDirectoryPath;
+    if (!cachePath) return;
+    if (!(await RNFS.exists(cachePath))) return;
+    const entries = await RNFS.readDir(cachePath);
+    await Promise.allSettled(entries.map((entry) => RNFS.unlink(entry.path)));
   }
 
   useEffect(() => {
@@ -475,6 +488,7 @@ export default function App() {
     let selfHealTimer: ReturnType<typeof setInterval> | null = null;
     let cacheGuardTimer: ReturnType<typeof setInterval> | null = null;
     let reconnectTimer: ReturnType<typeof setInterval> | null = null;
+    let offlineNoticeTimer: ReturnType<typeof setInterval> | null = null;
     let initRetryTimer: ReturnType<typeof setTimeout> | null = null;
     let mediaUpdateTimer: ReturnType<typeof setTimeout> | null = null;
     let initInProgress = false;
@@ -548,14 +562,20 @@ export default function App() {
 
         const networkState = nativeDeviceModule.getNetworkState() || {};
         const hasInternet = !!networkState?.internet;
-        if (hasInternet) return;
+        const connected = !!networkState?.connected;
+        if (hasInternet || connected) {
+          if (offlineNotice) setOfflineNotice("");
+          return;
+        }
 
         setConnectTexts(
-          "Internet OFF detected. Trying auto WiFi recovery",
-          "Recovering network..."
+          "Internet OFF detected. Running offline",
+          "Offline mode"
         );
 
-        if (nativeDeviceModule?.tryRecoverInternet) {
+        setOfflineNotice("Internet not connected. Running in offline mode.");
+
+        if (ENABLE_AUTO_WIFI_RECOVERY && nativeDeviceModule?.tryRecoverInternet) {
           const recovery = nativeDeviceModule.tryRecoverInternet();
           emitDeviceHealth("network-recovery", { networkState, recovery });
         } else {
@@ -567,6 +587,7 @@ export default function App() {
     };
 
     const startNetworkRecoveryLoop = () => {
+      if (!ENABLE_NETWORK_RECOVERY_LOOP) return;
       if (networkRecoveryTimer) return;
       checkAndRecoverNetwork();
       networkRecoveryTimer = setInterval(() => {
@@ -578,6 +599,34 @@ export default function App() {
       if (!networkRecoveryTimer) return;
       clearInterval(networkRecoveryTimer);
       networkRecoveryTimer = null;
+    };
+
+    const refreshOfflineNotice = () => {
+      try {
+        const nativeDeviceModule = (NativeModules as any)?.DeviceIdModule;
+        if (!nativeDeviceModule?.getNetworkState) return;
+        const networkState = nativeDeviceModule.getNetworkState() || {};
+        const hasInternet = !!networkState?.internet;
+        const connected = !!networkState?.connected;
+        if (hasInternet || connected) {
+          if (offlineNotice) setOfflineNotice("");
+          return;
+        }
+        setOfflineNotice("Internet not connected. Running in offline mode.");
+      } catch {
+      }
+    };
+
+    const startOfflineNoticeLoop = () => {
+      if (offlineNoticeTimer) return;
+      refreshOfflineNotice();
+      offlineNoticeTimer = setInterval(refreshOfflineNotice, OFFLINE_NOTICE_POLL_MS);
+    };
+
+    const stopOfflineNoticeLoop = () => {
+      if (!offlineNoticeTimer) return;
+      clearInterval(offlineNoticeTimer);
+      offlineNoticeTimer = null;
     };
 
     const pingServer = async (serverUrl: string, timeoutMs: number) => {
@@ -811,12 +860,12 @@ export default function App() {
       initInProgress = true;
       try {
         await restoreServerFromStorage();
-        checkAndRecoverNetwork();
+        if (ENABLE_NETWORK_RECOVERY_LOOP) checkAndRecoverNetwork();
         setConnectTexts("Scanning local network for CMS server", "Network scan running");
         const url = await findCMS();
         if (!url) {
           console.log("No CMS found – using cached content if available");
-          checkAndRecoverNetwork();
+          if (ENABLE_NETWORK_RECOVERY_LOOP) checkAndRecoverNetwork();
           await restoreServerFromStorage();
         const cachedConfig = await loadConfig(setConfig);
         await syncMedia({ blockUntilCachedSmallBytes: SMALL_CACHE_BLOCK_BYTES });
@@ -916,6 +965,7 @@ export default function App() {
                 blockUntilCachedSmallBytes: SMALL_CACHE_BLOCK_BYTES,
                 pruneStaleNow: true,
               });
+              await clearRuntimeTransientCache();
               try {
                 const { DeviceIdModule: NativeDeviceModule } = NativeModules as any;
                 if (NativeDeviceModule?.clearVideoCache) {
@@ -994,6 +1044,7 @@ export default function App() {
                     blockUntilCachedSmallBytes: SMALL_CACHE_BLOCK_BYTES,
                     pruneStaleNow: true,
                   });
+                  await clearRuntimeTransientCache();
                   try {
                     const { DeviceIdModule: NativeDeviceModule } = NativeModules as any;
                     if (NativeDeviceModule?.clearVideoCache) {
@@ -1080,7 +1131,7 @@ export default function App() {
           startDisconnectRecovery(`disconnect:${String(reason)}`);
         });
         socket.on("connect_error", (err) => {
-          checkAndRecoverNetwork();
+          if (ENABLE_NETWORK_RECOVERY_LOOP) checkAndRecoverNetwork();
           setConnectTexts(
             "Socket unavailable. Continuing cached playback",
             "Offline mode"
@@ -1113,6 +1164,7 @@ export default function App() {
     startSelfHealSyncLoop();
     startCacheGuardLoop();
     startReconnectLoop();
+    startOfflineNoticeLoop();
 
     return () => {
       isMounted = false;
@@ -1123,6 +1175,7 @@ export default function App() {
       stopSelfHealSyncLoop();
       stopCacheGuardLoop();
       stopReconnectLoop();
+      stopOfflineNoticeLoop();
       if (initRetryTimer) {
         clearTimeout(initRetryTimer);
         initRetryTimer = null;
@@ -1130,6 +1183,10 @@ export default function App() {
       if (mediaUpdateTimer) {
         clearTimeout(mediaUpdateTimer);
         mediaUpdateTimer = null;
+      }
+      if (offlineNoticeTimerRef.current) {
+        clearTimeout(offlineNoticeTimerRef.current);
+        offlineNoticeTimerRef.current = null;
       }
       if (healthTimer) {
         clearInterval(healthTimer);
@@ -1404,6 +1461,11 @@ export default function App() {
           ) : null}
         </View>
       ) : null}
+      {offlineNotice ? (
+        <View style={styles.offlineToast}>
+          <Text style={styles.offlineToastText}>{offlineNotice}</Text>
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -1617,6 +1679,23 @@ const styles = StyleSheet.create({
     color: "rgba(220, 230, 240, 0.9)",
     fontSize: 16,
     lineHeight: 24,
+    textAlign: "center",
+  },
+  offlineToast: {
+    position: "absolute",
+    left: 16,
+    right: 16,
+    bottom: 16,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 12,
+    backgroundColor: "rgba(10, 16, 22, 0.9)",
+    borderWidth: 1,
+    borderColor: "rgba(120, 180, 220, 0.4)",
+  },
+  offlineToastText: {
+    color: "rgba(200, 225, 240, 0.95)",
+    fontSize: 12,
     textAlign: "center",
   },
 });

@@ -1,5 +1,11 @@
-const SUPPORTED_FILE_EXT = /\.(mp4|mkv|webm|jpg|jpeg|png|txt|pdf)$/i;
+const SUPPORTED_FILE_EXT = /\.(mp4|mkv|webm|jpg|jpeg|png|txt|pdf|ppt|pptx|pptm|pps|ppsx|potx)$/i;
 const VIDEO_FILE_EXT = /\.(mp4|mkv|webm)$/i;
+const PPT_FILE_EXT = /\.(ppt|pptx|pptm|pps|ppsx|potx)$/i;
+const PPTX_FILE_EXT = /\.(pptx|pptm|ppsx|potx)$/i;
+const PPT_LEGACY_EXT = /\.(ppt|pps)$/i;
+const PPTX_CANVAS_WIDTH = 1920;
+const PPTX_CANVAS_HEIGHT = 1080;
+const PPTX_RENDER_DPR = 1;
 const MAX_FILES_PER_UPLOAD = 120;
 const HARD_FILE_SIZE_BYTES = 5 * 1024 * 1024 * 1024;
 const WARN_FILE_SIZE_BYTES = 700 * 1024 * 1024;
@@ -365,13 +371,25 @@ function sanitizeUploadErrorMessage(message, statusCode) {
 async function canUploadVideosToSection(deviceId, section) {
   const res = await fetch(`/media-list?deviceId=${deviceId}&ts=${Date.now()}`);
   const files = await res.json();
-  const otherSectionHasVideo = (files || []).some((f) => {
+  const hasVideoOrPptElsewhere = (files || []).some((f) => {
+    const name = f.originalName || f.name || "";
     const sec = Number(f.section || 1);
     if (sec === Number(section)) return false;
-    const name = f.originalName || f.name || "";
-    return VIDEO_FILE_EXT.test(name);
+    return VIDEO_FILE_EXT.test(name) || PPT_FILE_EXT.test(name);
   });
-  return !otherSectionHasVideo;
+  return !hasVideoOrPptElsewhere;
+}
+
+async function canUploadPptToSection(deviceId, section) {
+  const res = await fetch(`/media-list?deviceId=${deviceId}&ts=${Date.now()}`);
+  const files = await res.json();
+  const hasVideoOrPptElsewhere = (files || []).some((f) => {
+    const name = f.originalName || f.name || "";
+    const sec = Number(f.section || 1);
+    if (sec === Number(section)) return false;
+    return VIDEO_FILE_EXT.test(name) || PPT_FILE_EXT.test(name);
+  });
+  return !hasVideoOrPptElsewhere;
 }
 
 function fileNameBase(name) {
@@ -466,6 +484,204 @@ async function convertPdfFileToImages(file) {
         type: "image/png",
       })
     );
+  }
+
+  return converted;
+}
+
+let pptxViewLoadingPromise = null;
+function ensurePptxViewLoaded() {
+  if (window.PptxViewJS && window.PptxViewJS.PPTXViewer) {
+    return Promise.resolve(window.PptxViewJS);
+  }
+  if (pptxViewLoadingPromise) return pptxViewLoadingPromise;
+
+  const loadScript = (src) =>
+    new Promise((resolve, reject) => {
+      const script = document.createElement("script");
+      script.src = src;
+      script.onload = () => resolve();
+      script.onerror = () => {
+        script.remove();
+        reject(new Error(`Failed to load ${src}`));
+      };
+      document.head.appendChild(script);
+    });
+
+  pptxViewLoadingPromise = (async () => {
+    const candidates = [
+      {
+        jszip: "https://cdn.jsdelivr.net/npm/jszip/dist/jszip.min.js",
+        chart: "https://cdn.jsdelivr.net/npm/chart.js/dist/chart.umd.min.js",
+        pptx: "https://cdn.jsdelivr.net/npm/pptxviewjs/dist/PptxViewJS.min.js",
+      },
+      {
+        jszip: "https://unpkg.com/jszip/dist/jszip.min.js",
+        chart: "https://unpkg.com/chart.js/dist/chart.umd.min.js",
+        pptx: "https://unpkg.com/pptxviewjs/dist/PptxViewJS.min.js",
+      },
+    ];
+
+    let lastErr = null;
+    for (const candidate of candidates) {
+      try {
+        await loadScript(candidate.jszip);
+        await loadScript(candidate.chart);
+        await loadScript(candidate.pptx);
+        if (window.PptxViewJS && window.PptxViewJS.PPTXViewer) {
+          return window.PptxViewJS;
+        }
+      } catch (err) {
+        lastErr = err;
+      }
+    }
+    throw lastErr || new Error("Failed to load PPTX viewer library.");
+  })();
+
+  return pptxViewLoadingPromise;
+}
+
+let pptxFontsLoadingPromise = null;
+function ensurePptxFontsLoaded() {
+  if (pptxFontsLoadingPromise) return pptxFontsLoadingPromise;
+  pptxFontsLoadingPromise = (async () => {
+    const styleId = "pptx-fonts";
+    if (!document.getElementById(styleId)) {
+      const style = document.createElement("style");
+      style.id = styleId;
+      style.textContent = `
+@font-face {
+  font-family: "Carlito";
+  font-style: normal;
+  font-weight: 400;
+  src: url("https://cdn.jsdelivr.net/fontsource/fonts/carlito@latest/latin-400-normal.woff2") format("woff2"),
+       url("https://cdn.jsdelivr.net/fontsource/fonts/carlito@latest/latin-400-normal.woff") format("woff");
+}
+@font-face {
+  font-family: "Carlito";
+  font-style: normal;
+  font-weight: 700;
+  src: url("https://cdn.jsdelivr.net/fontsource/fonts/carlito@latest/latin-700-normal.woff2") format("woff2"),
+       url("https://cdn.jsdelivr.net/fontsource/fonts/carlito@latest/latin-700-normal.woff") format("woff");
+}
+@font-face {
+  font-family: "Arimo";
+  font-style: normal;
+  font-weight: 400 700;
+  src: url("https://cdn.jsdelivr.net/fontsource/fonts/arimo@latest/latin-wght-normal.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Calibri";
+  font-style: normal;
+  font-weight: 400;
+  src: url("https://cdn.jsdelivr.net/fontsource/fonts/carlito@latest/latin-400-normal.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Calibri";
+  font-style: normal;
+  font-weight: 700;
+  src: url("https://cdn.jsdelivr.net/fontsource/fonts/carlito@latest/latin-700-normal.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Arial";
+  font-style: normal;
+  font-weight: 400 700;
+  src: url("https://cdn.jsdelivr.net/fontsource/fonts/arimo@latest/latin-wght-normal.woff2") format("woff2");
+}
+      `;
+      document.head.appendChild(style);
+    }
+    if (document.fonts && document.fonts.ready) {
+      await document.fonts.ready;
+    } else {
+      await new Promise((resolve) => setTimeout(resolve, 1200));
+    }
+  })();
+  return pptxFontsLoadingPromise;
+}
+
+async function convertPptxFileToImages(file) {
+  await ensurePptxFontsLoaded();
+  const PptxViewJS = await ensurePptxViewLoaded();
+  const base = fileNameBase(file.name || "presentation");
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.round(PPTX_CANVAS_WIDTH * PPTX_RENDER_DPR);
+  canvas.height = Math.round(PPTX_CANVAS_HEIGHT * PPTX_RENDER_DPR);
+  const viewer = new PptxViewJS.PPTXViewer({
+    canvas,
+    autoExposeGlobals: true,
+  });
+
+  let slideSize = null;
+  const slideCount = await new Promise((resolve, reject) => {
+    viewer.on("loadComplete", (info) => {
+      const count = Number(info?.slideCount || 0);
+      const w = Number(info?.slideWidth || info?.width || info?.size?.width || 0);
+      const h = Number(info?.slideHeight || info?.height || info?.size?.height || 0);
+      if (w > 0 && h > 0) slideSize = { width: w, height: h };
+      resolve(count || 0);
+    });
+    viewer.on("loadError", (err) => reject(err || new Error("PPTX load failed")));
+    viewer.loadFile(file).catch((err) => reject(err));
+  });
+
+  if (!slideCount) {
+    throw new Error("No slides found in PowerPoint file.");
+  }
+
+  const converted = [];
+  const tryRender = async (index) => {
+    try {
+      await viewer.renderSlide(index, canvas);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  let baseIndex = null;
+  let firstIndex = null;
+  if (await tryRender(1)) {
+    baseIndex = 1;
+    firstIndex = 1;
+  } else if (await tryRender(0)) {
+    baseIndex = 0;
+    firstIndex = 0;
+  } else {
+    throw new Error("PPTX slide render failed.");
+  }
+
+  if (slideSize && slideSize.width > 0 && slideSize.height > 0) {
+    const aspect = slideSize.width / slideSize.height;
+    let targetW = PPTX_CANVAS_WIDTH;
+    let targetH = PPTX_CANVAS_HEIGHT;
+    if (aspect > 0) {
+      const fitW = Math.round(PPTX_CANVAS_HEIGHT * aspect);
+      if (fitW <= PPTX_CANVAS_WIDTH) {
+        targetW = fitW;
+        targetH = PPTX_CANVAS_HEIGHT;
+      } else {
+        targetW = PPTX_CANVAS_WIDTH;
+        targetH = Math.round(PPTX_CANVAS_WIDTH / aspect);
+      }
+    }
+    canvas.width = Math.round(targetW * PPTX_RENDER_DPR);
+    canvas.height = Math.round(targetH * PPTX_RENDER_DPR);
+  }
+
+  for (let offset = 0; offset < slideCount; offset += 1) {
+    const slideIndex = baseIndex + offset;
+    if (slideIndex !== firstIndex) {
+      const ok = await tryRender(slideIndex);
+      if (!ok) break;
+    }
+    const blob = await canvasToBlob(canvas, "image/png");
+    converted.push(
+      new File([blob], `${base}__slide-${pad3(offset + 1)}.png`, {
+        type: "image/png",
+      })
+    );
+    firstIndex = null;
   }
 
   return converted;
@@ -1659,7 +1875,7 @@ function renderUploadSections() {
             type="file"
             id="media${i}"
             multiple
-            accept=".mp4,.m4v,.mov,.mkv,.webm,.jpg,.jpeg,.png,.txt,.pdf,video/mp4,video/quicktime,video/webm,image/jpeg,image/png,text/plain,application/pdf"
+            accept=".mp4,.m4v,.mov,.mkv,.webm,.jpg,.jpeg,.png,.txt,.pdf,.ppt,.pptx,.pptm,.pps,.ppsx,.potx,video/mp4,video/quicktime,video/webm,image/jpeg,image/png,text/plain,application/pdf,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation,application/vnd.ms-powerpoint.presentation.macroenabled.12,application/vnd.openxmlformats-officedocument.presentationml.slideshow,application/vnd.ms-powerpoint.slideshow.macroenabled.12,application/vnd.openxmlformats-officedocument.presentationml.template"
           />
           <button class="btn primary" onclick="uploadMedia(${i})">Upload Section ${i}</button>
         </div>
@@ -1714,6 +1930,7 @@ async function uploadMedia(section) {
 
   const { errors, warnings, validFiles, totalSize } = validateUploadFiles(files);
   const selectedHasVideo = validFiles.some((f) => VIDEO_FILE_EXT.test(f.name || ""));
+  const selectedHasPpt = validFiles.some((f) => PPT_FILE_EXT.test(f.name || ""));
 
   if (errors.length) {
     showNotice("error", "Upload Validation Failed", errors.join("\n"), 7000);
@@ -1740,8 +1957,20 @@ async function uploadMedia(section) {
       if (!allowed) {
         showNotice(
           "warning",
-          "Video Upload Restricted",
-          "Video upload allowed in only one grid section. Remove video from other section first.",
+          "Video/PPT Upload Restricted",
+          "Video/PPT allowed in only one grid section. Remove PPT/video from all sections first.",
+          6500
+        );
+        return;
+      }
+    }
+    if (selectedHasPpt) {
+      const allowed = await canUploadPptToSection(deviceId, section);
+      if (!allowed) {
+        showNotice(
+          "warning",
+          "PPT/Video Upload Restricted",
+          "PPT/video allowed in only one grid section. Remove PPT/video from all sections first.",
           6500
         );
         return;
@@ -1749,6 +1978,31 @@ async function uploadMedia(section) {
     }
 
     let uploadFiles = [...validFiles];
+
+    const legacyPpt = uploadFiles.filter((f) => PPT_LEGACY_EXT.test(f.name || ""));
+    if (legacyPpt.length) {
+      throw new Error("Old PowerPoint (.ppt/.pps) not supported. Please save as .pptx and retry.");
+    }
+
+    const pptxFiles = uploadFiles.filter((f) => PPTX_FILE_EXT.test(f.name || ""));
+    let containsPpt = false;
+    if (pptxFiles.length) {
+      updateUploadProgress(0, "Converting PowerPoint slides to images...");
+      const nonPptx = uploadFiles.filter((f) => !PPTX_FILE_EXT.test(f.name || ""));
+      const convertedPptImages = [];
+      let slideCounter = 0;
+      for (const pptxFile of pptxFiles) {
+        const slides = await convertPptxFileToImages(pptxFile);
+        slideCounter += slides.length;
+        convertedPptImages.push(...slides);
+        updateUploadProgress(0, `PowerPoint converted: ${slideCounter} slide(s)`);
+      }
+      uploadFiles = [...nonPptx, ...convertedPptImages];
+      containsPpt = true;
+      if (!uploadFiles.length) {
+        throw new Error("No uploadable files generated from PowerPoint");
+      }
+    }
 
     const pdfFiles = uploadFiles.filter((f) => /\.pdf$/i.test(f.name || ""));
     if (pdfFiles.length) {
@@ -1766,6 +2020,9 @@ async function uploadMedia(section) {
     }
 
     const formData = new FormData();
+    if (containsPpt) {
+      formData.append("containsPpt", "1");
+    }
     for (const file of uploadFiles) {
       formData.append("files", file);
     }
@@ -1788,6 +2045,8 @@ async function uploadMedia(section) {
     const rawMessage = String(err?.message || "Unknown error");
     const message = /pdf engine/i.test(rawMessage)
       ? `${rawMessage}\n\nPDF uploads require conversion on the CMS page before sending to devices.`
+      : /pptx|powerpoint/i.test(rawMessage)
+      ? `${rawMessage}\n\nPowerPoint conversion happens in the CMS browser. Please ensure the CMS PC has internet access to load the viewer libraries.`
       : rawMessage;
     showNotice("error", "Upload Failed", message, 7000);
   } finally {

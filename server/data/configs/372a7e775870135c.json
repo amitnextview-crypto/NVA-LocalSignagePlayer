@@ -1,8 +1,8 @@
 {
   "orientation": "horizontal",
-  "layout": "grid2",
+  "layout": "grid3",
   "grid3Layout": "stack-v",
-  "gridRatio": "1:1",
+  "gridRatio": "1:1:1",
   "slideDuration": 7,
   "animation": "slide",
   "bgColor": "#000000",

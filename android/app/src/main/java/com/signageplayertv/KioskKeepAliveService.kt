@@ -20,7 +20,7 @@ class KioskKeepAliveService : Service() {
     private const val CHANNEL_ID = "signage_keepalive_channel"
     private const val CHANNEL_NAME = "Signage Keep Alive"
     private const val NOTIF_ID = 4401
-    private const val WATCHDOG_INTERVAL_MS = 3000L
+    private const val WATCHDOG_INTERVAL_MS = 10000L
     private const val REOPEN_REQ_CODE = 7202
     private const val PREFS_NAME = "kiosk_prefs"
     private const val KEY_AUTO_REOPEN_ENABLED = "auto_reopen_enabled"
