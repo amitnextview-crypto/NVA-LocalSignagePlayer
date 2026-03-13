@@ -25,6 +25,13 @@ import com.google.android.exoplayer2.upstream.DefaultDataSource;
 import com.google.android.exoplayer2.upstream.DefaultHttpDataSource;
 import com.google.android.exoplayer2.ui.AspectRatioFrameLayout;
 import com.google.android.exoplayer2.ui.StyledPlayerView;
+import com.google.android.exoplayer2.database.StandaloneDatabaseProvider;
+import com.google.android.exoplayer2.upstream.cache.CacheDataSink;
+import com.google.android.exoplayer2.upstream.cache.CacheDataSource;
+import com.google.android.exoplayer2.upstream.cache.LeastRecentlyUsedCacheEvictor;
+import com.google.android.exoplayer2.upstream.cache.SimpleCache;
+
+import java.io.File;
 
 public class NativeVideoPlayerView extends FrameLayout implements LifecycleEventListener {
     private final ReactContext reactContext;
@@ -36,6 +43,9 @@ public class NativeVideoPlayerView extends FrameLayout implements LifecycleEvent
     private String resizeMode = "stretch";
     private float rotation = 0f;
     private boolean attached = false;
+    private static SimpleCache videoCache;
+    private static final long VIDEO_CACHE_DEFAULT_BYTES = 2L * 1024 * 1024 * 1024; // 2GB
+    private static long videoCacheMaxBytes = VIDEO_CACHE_DEFAULT_BYTES;
 
     public NativeVideoPlayerView(@NonNull Context context, @NonNull ReactContext reactContext) {
         super(context);
@@ -50,6 +60,61 @@ public class NativeVideoPlayerView extends FrameLayout implements LifecycleEvent
         applyResizeMode();
         applyRotation();
         reactContext.addLifecycleEventListener(this);
+    }
+
+    private static synchronized SimpleCache getVideoCache(Context context) {
+        long prefMaxBytes = VIDEO_CACHE_DEFAULT_BYTES;
+        try {
+            prefMaxBytes = context.getSharedPreferences("kiosk_prefs", Context.MODE_PRIVATE)
+                    .getLong("video_cache_max_bytes", VIDEO_CACHE_DEFAULT_BYTES);
+        } catch (Exception ignored) {
+        }
+        if (prefMaxBytes < 256L * 1024 * 1024) prefMaxBytes = 256L * 1024 * 1024;
+        if (videoCache != null && videoCacheMaxBytes == prefMaxBytes) return videoCache;
+        if (videoCache != null) {
+            try {
+                videoCache.release();
+            } catch (Exception ignored) {
+            }
+            videoCache = null;
+        }
+        videoCacheMaxBytes = prefMaxBytes;
+        File cacheDir = new File(context.getCacheDir(), "exo_video_cache");
+        LeastRecentlyUsedCacheEvictor evictor = new LeastRecentlyUsedCacheEvictor(videoCacheMaxBytes);
+        StandaloneDatabaseProvider dbProvider = new StandaloneDatabaseProvider(context);
+        videoCache = new SimpleCache(cacheDir, evictor, dbProvider);
+        return videoCache;
+    }
+
+    public static synchronized void clearVideoCache(Context context) {
+        try {
+            if (videoCache != null) {
+                try {
+                    videoCache.release();
+                } catch (Exception ignored) {
+                }
+                videoCache = null;
+            }
+            File cacheDir = new File(context.getCacheDir(), "exo_video_cache");
+            deleteDir(cacheDir);
+        } catch (Exception ignored) {
+        }
+    }
+
+    private static void deleteDir(File dir) {
+        if (dir == null || !dir.exists()) return;
+        if (dir.isDirectory()) {
+            File[] files = dir.listFiles();
+            if (files != null) {
+                for (File f : files) {
+                    deleteDir(f);
+                }
+            }
+        }
+        try {
+            dir.delete();
+        } catch (Exception ignored) {
+        }
     }
 
     public void setSrc(String value) {
@@ -88,10 +153,10 @@ public class NativeVideoPlayerView extends FrameLayout implements LifecycleEvent
 
         DefaultLoadControl loadControl = new DefaultLoadControl.Builder()
                 .setBufferDurationsMs(
-                        15000,
-                        90000,
-                        2500,
-                        5000
+                        12000,
+                        60000,
+                        2000,
+                        4000
                 )
                 .setTargetBufferBytes(C.LENGTH_UNSET)
                 .setPrioritizeTimeOverSizeThresholds(true)
@@ -99,9 +164,17 @@ public class NativeVideoPlayerView extends FrameLayout implements LifecycleEvent
 
         DefaultHttpDataSource.Factory httpFactory = new DefaultHttpDataSource.Factory()
                 .setAllowCrossProtocolRedirects(true)
-                .setConnectTimeoutMs(15000)
-                .setReadTimeoutMs(30000);
-        DefaultDataSource.Factory dataSourceFactory = new DefaultDataSource.Factory(getContext(), httpFactory);
+                .setConnectTimeoutMs(20000)
+                .setReadTimeoutMs(45000);
+        DefaultDataSource.Factory upstreamFactory = new DefaultDataSource.Factory(getContext(), httpFactory);
+        CacheDataSink.Factory cacheSinkFactory = new CacheDataSink.Factory()
+                .setCache(getVideoCache(getContext()))
+                .setFragmentSize(CacheDataSink.DEFAULT_FRAGMENT_SIZE);
+        CacheDataSource.Factory dataSourceFactory = new CacheDataSource.Factory()
+                .setCache(getVideoCache(getContext()))
+                .setUpstreamDataSourceFactory(upstreamFactory)
+                .setCacheWriteDataSinkFactory(cacheSinkFactory)
+                .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR);
 
         DefaultRenderersFactory renderersFactory = new DefaultRenderersFactory(getContext())
                 .setEnableDecoderFallback(true);
@@ -117,7 +190,15 @@ public class NativeVideoPlayerView extends FrameLayout implements LifecycleEvent
         player.addListener(new Player.Listener() {
             @Override
             public void onPlaybackStateChanged(int playbackState) {
+                if (playbackState == Player.STATE_BUFFERING) {
+                    WritableMap payload = Arguments.createMap();
+                    payload.putBoolean("buffering", true);
+                    dispatchEvent("topBuffer", payload);
+                }
                 if (playbackState == Player.STATE_READY) {
+                    WritableMap payload = Arguments.createMap();
+                    payload.putBoolean("buffering", false);
+                    dispatchEvent("topBuffer", payload);
                     dispatchEvent("topReady", null);
                 }
                 if (playbackState == Player.STATE_ENDED && !repeat) {

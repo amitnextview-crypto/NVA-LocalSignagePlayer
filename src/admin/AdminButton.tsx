@@ -7,20 +7,24 @@ export default function AdminButton({ onOpen }: any) {
       onPress={onOpen}
       style={{
         position: "absolute",
-        top: 4,
-        right: 12,
-        padding: 4,
-        backgroundColor: "rgba(8,12,18,0.55)",
+        bottom: 8,
+        left: 8,
+        padding: 2,
+        backgroundColor: "rgba(10, 18, 26, 0.28)",
         borderRadius: 999,
         borderWidth: 1,
-        borderColor: "rgba(255,255,255,0.12)",
+        borderColor: "rgba(120, 200, 255, 0.15)",
+        shadowColor: "#000",
+        shadowOpacity: 0.12,
+        shadowRadius: 4,
+        elevation: 2,
       }}
     >
       <Text
         style={{
-          fontSize: 12,
-          color: "rgba(255,255,255,0.72)",
-          fontWeight: "700",
+          fontSize: 7,
+          color: "rgba(233, 246, 255, 0.85)",
+          fontWeight: "800",
         }}
       >
         {"\u2699"}

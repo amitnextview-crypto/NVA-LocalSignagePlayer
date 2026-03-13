@@ -837,19 +837,24 @@ function renderPreviewEmpty(slot, title, subtitle, hint, badgeText = "UPLOAD REQ
   slot.appendChild(card);
 }
 
-function normalizePreviewCacheStatus(status, rawStatus) {
-  const base = String(rawStatus || "").trim().toLowerCase();
-  if (base === "cached" || base === "streaming") return base;
-  if (!status) return "";
-  if (base === "offline") return "cached";
-  if (base === "empty" || !base) return status.online ? "streaming" : "cached";
-  return base;
+function parsePreviewCacheStatus(status, rawStatus) {
+  const raw = String(rawStatus || "").trim();
+  const base = raw.toLowerCase();
+  if (base.startsWith("streaming")) return { base: "streaming", label: raw };
+  if (base === "cached") return { base: "cached", label: "CACHED" };
+  if (base === "offline") return { base: "offline", label: "OFFLINE" };
+  if (base === "empty") return { base: "empty", label: "EMPTY" };
+  if (!raw) {
+    if (!status) return { base: "", label: "" };
+    return status.online ? { base: "", label: "" } : { base: "offline", label: "OFFLINE" };
+  }
+  return { base, label: raw };
 }
 
 function applyPreviewLiveOverlay(slot, status, sectionNumber, cacheStatusOverride = "") {
   if (!status) return;
   const liveSection = getLivePlaybackForSection(sectionNumber, status);
-  const cacheStatus = normalizePreviewCacheStatus(
+  const cacheStatus = parsePreviewCacheStatus(
     status,
     cacheStatusOverride || liveSection?.cacheStatus || ""
   );
@@ -859,35 +864,33 @@ function applyPreviewLiveOverlay(slot, status, sectionNumber, cacheStatusOverrid
   badge.textContent = status.online ? "LIVE" : "OFFLINE";
   slot.appendChild(badge);
 
-  if (cacheStatus && cacheStatus !== "live") {
+  if (cacheStatus.base) {
     const cacheBadge = document.createElement("div");
-    cacheBadge.className = `preview-cache-badge ${cacheStatus}`;
-    cacheBadge.textContent = cacheStatus.toUpperCase();
+    cacheBadge.className = `preview-cache-badge ${cacheStatus.base}`;
+    cacheBadge.textContent = String(cacheStatus.label || "").toUpperCase();
     slot.appendChild(cacheBadge);
   }
 
-  const panel = document.createElement("div");
-  panel.className = "preview-live-panel";
-  const lines = [];
+  if (status?.meta?.mediaCacheSummary) {
+    const sum = status.meta.mediaCacheSummary;
+    if (Number(sum?.total || 0) > 0) {
+      const percent = Number(sum?.percent || 0);
+      const cachePctBadge = document.createElement("div");
+      cachePctBadge.className = "preview-cache-badge cache-percent";
+      cachePctBadge.textContent = `CACHE ${percent}%`;
+      slot.appendChild(cachePctBadge);
 
-  if (!status.online) {
-    lines.push("Device offline");
-  } else if (liveSection?.title) {
-    lines.push(`Now: ${liveSection.title}`);
-  } else {
-    lines.push("No media playing");
+      const bar = document.createElement("div");
+      bar.className = "preview-cache-bar";
+      const fill = document.createElement("div");
+      fill.className = "preview-cache-bar-fill";
+      fill.style.width = `${Math.max(0, Math.min(100, percent))}%`;
+      bar.appendChild(fill);
+      slot.appendChild(bar);
+    }
   }
 
-  if (status.lastError) {
-    lines.push(`Error: ${status.lastError}`);
-  }
-
-  if (cacheStatus && cacheStatus !== "live") {
-    lines.push(`Mode: ${cacheStatus.toUpperCase()}`);
-  }
-
-  panel.textContent = lines.join("\n");
-  slot.appendChild(panel);
+  // Live detail panel removed as requested.
 }
 
 function renderSectionSlot(slot, sectionNumber, config) {
@@ -904,7 +907,7 @@ function renderSectionSlot(slot, sectionNumber, config) {
     : liveSection?.cacheStatus
     ? String(liveSection.cacheStatus)
     : selectedStatus.online
-    ? "Empty"
+    ? ""
     : "Offline";
   const liveMode = !!selectedStatus?.online && !!liveSection;
 
@@ -1111,7 +1114,83 @@ function renderScreenPreview() {
   const preview = document.getElementById("screenPreview");
   if (!preview) return;
   preview.innerHTML = liveLayoutMarkup(layout, selectedGrid3Layout);
+  applyPreviewTicker(preview, config.ticker || {});
   startLivePreviewPlayback(config);
+}
+
+function applyPreviewTicker(preview, ticker = {}) {
+  const existing = preview.querySelector(".preview-ticker");
+  if (existing) {
+    if (existing.__tickerAnimation) {
+      try {
+        existing.__tickerAnimation.cancel();
+      } catch (_e) {
+      }
+    }
+    existing.remove();
+  }
+
+  const layoutEl = preview.querySelector(".preview-layout");
+  if (layoutEl) {
+    layoutEl.style.height = "100%";
+    layoutEl.style.marginTop = "0px";
+    layoutEl.style.marginBottom = "0px";
+  }
+
+  const text = String(ticker?.text || "").trim();
+  if (!text) return;
+
+  const fontSize = Number(ticker?.fontSize || 24);
+  const padY = 6;
+  const tickerHeight = Math.max(22, Math.round(fontSize + padY * 2));
+  const position = String(ticker?.position || "bottom");
+
+  const wrap = document.createElement("div");
+  wrap.className = `preview-ticker ${position === "top" ? "top" : "bottom"}`;
+  wrap.style.background = String(ticker?.bgColor || "#000");
+  wrap.style.height = `${tickerHeight}px`;
+
+  const track = document.createElement("div");
+  track.className = "preview-ticker-track";
+
+  const span = document.createElement("span");
+  span.className = "preview-ticker-text";
+  span.textContent = text;
+  span.style.color = String(ticker?.color || "#fff");
+  span.style.fontSize = `${fontSize}px`;
+
+  track.appendChild(span);
+  wrap.appendChild(track);
+  preview.appendChild(wrap);
+
+  if (layoutEl) {
+    layoutEl.style.height = `calc(100% - ${tickerHeight}px)`;
+    if (position === "top") {
+      layoutEl.style.marginTop = `${tickerHeight}px`;
+    } else {
+      layoutEl.style.marginBottom = `${tickerHeight}px`;
+    }
+  }
+
+  requestAnimationFrame(() => {
+    const previewWidth = preview.clientWidth || 1;
+    const textWidth = span.getBoundingClientRect().width || 1;
+    const speed = Number.isFinite(Number(ticker?.speed)) ? Number(ticker.speed) : 6;
+    const pixelsPerSecond = 40 + speed * 15;
+    const distance = previewWidth + textWidth;
+    const duration = Math.max(2000, (distance / pixelsPerSecond) * 1000);
+    try {
+      const animation = track.animate(
+        [
+          { transform: `translateX(${previewWidth}px)` },
+          { transform: `translateX(-${textWidth}px)` },
+        ],
+        { duration, iterations: Infinity, easing: "linear" }
+      );
+      wrap.__tickerAnimation = animation;
+    } catch (_e) {
+    }
+  });
 }
 
 function buildConfigFromForm() {
@@ -1152,6 +1231,9 @@ function buildConfigFromForm() {
       speed: Number(document.getElementById("tickerSpeed").value || 6),
       fontSize: Number(document.getElementById("tickerFontSize").value || 24),
       position: document.getElementById("tickerPosition").value,
+    },
+    cache: {
+      videoMB: Number(document.getElementById("videoCacheMB")?.value || 2048),
     },
     schedule: getScheduleFromForm(),
   };
@@ -1727,16 +1809,18 @@ async function loadConfig() {
   document.getElementById("dir2").value = config.sections?.[1]?.slideDirection || "left";
   document.getElementById("dir3").value = config.sections?.[2]?.slideDirection || "left";
 
-  document.getElementById("duration1").value = config.sections?.[0]?.slideDuration || 5;
-  document.getElementById("duration2").value = config.sections?.[1]?.slideDuration || 5;
-  document.getElementById("duration3").value = config.sections?.[2]?.slideDuration || 5;
+  document.getElementById("duration1").value = config.sections?.[0]?.slideDuration || 7;
+  document.getElementById("duration2").value = config.sections?.[1]?.slideDuration || 13;
+  document.getElementById("duration3").value = config.sections?.[2]?.slideDuration || 19;
 
-  document.getElementById("tickerText").value = config.ticker?.text || "";
+  document.getElementById("tickerText").value =
+    config.ticker?.text || "Breaking News: NextView Premium Product New Update Available!";
   document.getElementById("tickerFontSize").value = config.ticker?.fontSize || 24;
   document.getElementById("tickerPosition").value = config.ticker?.position || "bottom";
   document.getElementById("tickerColor").value = config.ticker?.color || "#ffffff";
   document.getElementById("tickerBgColor").value = config.ticker?.bgColor || "#000000";
   document.getElementById("tickerSpeed").value = config.ticker?.speed ?? 6;
+  document.getElementById("videoCacheMB").value = config.cache?.videoMB || 2048;
   setScheduleToForm(config.schedule);
 
   selectedGrid3Layout = config.grid3Layout || "stack-v";

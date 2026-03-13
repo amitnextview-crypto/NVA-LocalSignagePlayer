@@ -1,4 +1,5 @@
 const express = require("express");
+const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
 const { safeStat, safeReaddir, safeExistsDir, safeExists } = require("../utils/fsSafe");
@@ -157,6 +158,33 @@ router.get("/", (req, res) => {
         mtimeMs: Number(stat.mtimeMs || 0),
       });
     }
+  }
+
+  try {
+    const hash = crypto
+      .createHash("sha1")
+      .update(
+        result
+          .map((item) =>
+            [
+              item.url,
+              item.size || 0,
+              item.mtimeMs || 0,
+              item.page || 0,
+              item.pageCount || 0,
+              item.section || 0,
+            ].join("|")
+          )
+          .join("~")
+      )
+      .digest("hex");
+    const etag = `"${hash}"`;
+    if (req.headers["if-none-match"] === etag) {
+      res.status(304).end();
+      return;
+    }
+    res.setHeader("ETag", etag);
+  } catch {
   }
 
   res.json(result);

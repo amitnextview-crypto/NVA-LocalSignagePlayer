@@ -38,6 +38,7 @@ export default function Ticker({ ticker }: any) {
 
   return (
     <View
+      renderToHardwareTextureAndroid
       style={{
         backgroundColor: ticker.bgColor || "#000",
         overflow: "hidden",
@@ -54,6 +55,11 @@ export default function Ticker({ ticker }: any) {
           transform: [{ translateX }],
           color: ticker.color || "#fff",
           fontSize: ticker.fontSize || 24,
+          textShadowColor: "rgba(0, 0, 0, 0.85)",
+          textShadowOffset: { width: 3, height: 3 },
+          textShadowRadius: 6,
+          letterSpacing: 0.6,
+          fontWeight: "800",
         }}
       >
         {ticker.text}

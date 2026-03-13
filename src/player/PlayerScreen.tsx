@@ -47,7 +47,14 @@ function isScheduleActive(schedule: any): boolean {
   return nowMinutes >= start || nowMinutes < end;
 }
 
-export default function PlayerScreen({ config, mediaVersion, uploadProcessingBySection, onPlaybackChange, onPlaybackError }: any) {
+export default function PlayerScreen({
+  config,
+  mediaVersion,
+  uploadProcessingBySection,
+  uploadCountsBySection,
+  onPlaybackChange,
+  onPlaybackError,
+}: any) {
   const [scheduleOn, setScheduleOn] = useState(true);
   const tickerHeight = config?.ticker?.text
     ? (config.ticker.fontSize || 24) + 12
@@ -73,6 +80,7 @@ export default function PlayerScreen({ config, mediaVersion, uploadProcessingByS
               config={config}
               mediaVersion={mediaVersion}
               processingMessage={uploadProcessingBySection?.[1] || ""}
+              processingCount={uploadCountsBySection?.[1] || null}
               onPlaybackChange={onPlaybackChange}
               onPlaybackError={onPlaybackError}
             />
@@ -84,6 +92,7 @@ export default function PlayerScreen({ config, mediaVersion, uploadProcessingByS
               config={config}
               mediaVersion={mediaVersion}
               processingMessage={uploadProcessingBySection?.[2] || ""}
+              processingCount={uploadCountsBySection?.[2] || null}
               onPlaybackChange={onPlaybackChange}
               onPlaybackError={onPlaybackError}
             />
@@ -95,6 +104,7 @@ export default function PlayerScreen({ config, mediaVersion, uploadProcessingByS
               config={config}
               mediaVersion={mediaVersion}
               processingMessage={uploadProcessingBySection?.[3] || ""}
+              processingCount={uploadCountsBySection?.[3] || null}
               onPlaybackChange={onPlaybackChange}
               onPlaybackError={onPlaybackError}
             />
@@ -111,24 +121,26 @@ export default function PlayerScreen({ config, mediaVersion, uploadProcessingByS
             <View style={{ flex: 1, marginRight: GRID_GAP / 2 }}>
               <SlideRenderer
                 key="section-0"
-                sectionIndex={0}
-                config={config}
-                mediaVersion={mediaVersion}
-                processingMessage={uploadProcessingBySection?.[1] || ""}
-                onPlaybackChange={onPlaybackChange}
-                onPlaybackError={onPlaybackError}
-              />
+              sectionIndex={0}
+              config={config}
+              mediaVersion={mediaVersion}
+              processingMessage={uploadProcessingBySection?.[1] || ""}
+              processingCount={uploadCountsBySection?.[1] || null}
+              onPlaybackChange={onPlaybackChange}
+              onPlaybackError={onPlaybackError}
+            />
             </View>
             <View style={{ flex: 1, marginLeft: GRID_GAP / 2 }}>
               <SlideRenderer
                 key="section-1"
-                sectionIndex={1}
-                config={config}
-                mediaVersion={mediaVersion}
-                processingMessage={uploadProcessingBySection?.[2] || ""}
-                onPlaybackChange={onPlaybackChange}
-                onPlaybackError={onPlaybackError}
-              />
+              sectionIndex={1}
+              config={config}
+              mediaVersion={mediaVersion}
+              processingMessage={uploadProcessingBySection?.[2] || ""}
+              processingCount={uploadCountsBySection?.[2] || null}
+              onPlaybackChange={onPlaybackChange}
+              onPlaybackError={onPlaybackError}
+            />
             </View>
           </View>
           <View style={{ flex: bottom }}>
@@ -138,6 +150,7 @@ export default function PlayerScreen({ config, mediaVersion, uploadProcessingByS
               config={config}
               mediaVersion={mediaVersion}
               processingMessage={uploadProcessingBySection?.[3] || ""}
+              processingCount={uploadCountsBySection?.[3] || null}
               onPlaybackChange={onPlaybackChange}
               onPlaybackError={onPlaybackError}
             />
@@ -196,6 +209,7 @@ export default function PlayerScreen({ config, mediaVersion, uploadProcessingByS
             config={config}
             mediaVersion={mediaVersion}
             processingMessage={uploadProcessingBySection?.[1] || ""}
+            processingCount={uploadCountsBySection?.[1] || null}
             onPlaybackChange={onPlaybackChange}
             onPlaybackError={onPlaybackError}
           />
@@ -207,6 +221,7 @@ export default function PlayerScreen({ config, mediaVersion, uploadProcessingByS
             config={config}
             mediaVersion={mediaVersion}
             processingMessage={uploadProcessingBySection?.[2] || ""}
+            processingCount={uploadCountsBySection?.[2] || null}
             onPlaybackChange={onPlaybackChange}
             onPlaybackError={onPlaybackError}
           />
@@ -218,6 +233,7 @@ export default function PlayerScreen({ config, mediaVersion, uploadProcessingByS
             config={config}
             mediaVersion={mediaVersion}
             processingMessage={uploadProcessingBySection?.[3] || ""}
+            processingCount={uploadCountsBySection?.[3] || null}
             onPlaybackChange={onPlaybackChange}
             onPlaybackError={onPlaybackError}
           />
@@ -379,6 +395,7 @@ export default function PlayerScreen({ config, mediaVersion, uploadProcessingByS
             sectionIndex={0}
             mediaVersion={mediaVersion}
             processingMessage={uploadProcessingBySection?.[1] || ""}
+            processingCount={uploadCountsBySection?.[1] || null}
             onPlaybackChange={onPlaybackChange}
             onPlaybackError={onPlaybackError}
           />

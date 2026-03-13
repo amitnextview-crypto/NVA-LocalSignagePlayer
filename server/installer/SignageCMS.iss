@@ -95,8 +95,8 @@ begin
       Log('Firewall rules configured for NVA SignagePlayerTV CMS.');
     end else begin
       SuppressibleMsgBox(
-        'Installer admin mode me nahi chala, isliye firewall rules automatically configure nahi huye.' + #13#10#13#10 +
-        'Agar CMS dusre devices se access na ho, to Windows Firewall me app ko allow karein.',
+        'The installer was not run in admin mode, so firewall rules were not configured automatically.' + #13#10#13#10 +
+        'If CMS is not reachable from other devices, allow the app in Windows Firewall.',
         mbInformation,
         MB_OK,
         IDOK

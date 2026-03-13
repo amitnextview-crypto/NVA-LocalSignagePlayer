@@ -33,6 +33,7 @@ import com.facebook.react.bridge.ReactMethod;
 public class DeviceIdModule extends ReactContextBaseJavaModule {
     private static final String PREFS_NAME = "kiosk_prefs";
     private static final String KEY_AUTO_REOPEN_ENABLED = "auto_reopen_enabled";
+    private static final String KEY_VIDEO_CACHE_MAX_BYTES = "video_cache_max_bytes";
     private static final int MAIN_REOPEN_REQ_CODE = 7201;
     private static final int SERVICE_REOPEN_REQ_CODE = 7202;
 
@@ -100,6 +101,38 @@ public class DeviceIdModule extends ReactContextBaseJavaModule {
         if (!enabled) {
             cancelReopenAlarm(context, MAIN_REOPEN_REQ_CODE);
             cancelReopenAlarm(context, SERVICE_REOPEN_REQ_CODE);
+            try {
+                Activity activity = getCurrentActivity();
+                if (activity instanceof MainActivity) {
+                    activity.runOnUiThread(() -> {
+                        try {
+                            ((MainActivity) activity).cancelScheduledReopenFromJs();
+                        } catch (Exception ignored) {
+                        }
+                    });
+                }
+            } catch (Exception ignored) {
+            }
+        }
+    }
+
+    @ReactMethod
+    public void setVideoCacheMaxBytes(double bytes) {
+        long value = (long) bytes;
+        if (value < 256L * 1024 * 1024) value = 256L * 1024 * 1024;
+        Context context = reactContext.getApplicationContext();
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                .edit()
+                .putLong(KEY_VIDEO_CACHE_MAX_BYTES, value)
+                .apply();
+    }
+
+    @ReactMethod
+    public void clearVideoCache() {
+        try {
+            Context context = reactContext.getApplicationContext();
+            NativeVideoPlayerView.clearVideoCache(context);
+        } catch (Exception ignored) {
         }
     }
 

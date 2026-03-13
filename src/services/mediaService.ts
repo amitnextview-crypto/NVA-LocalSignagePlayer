@@ -9,9 +9,30 @@ const MEDIA_ROOT = `${MEDIA_DIR}/files`;
 const MANIFEST_PATH = `${MEDIA_DIR}/manifest.json`;
 const LIST_CACHE_PATH = `${MEDIA_DIR}/list-cache.json`;
 const MEDIA_FETCH_TIMEOUT_MS = 2500;
-const DOWNLOAD_CONCURRENCY = 2;
-const LIST_REFRESH_MIN_INTERVAL_MS = 1000;
+const DOWNLOAD_CONCURRENCY = 8;
+const LARGE_MEDIA_BYTES = 300 * 1024 * 1024;
+const LARGE_MEDIA_CONCURRENCY = 1;
+const LIST_REFRESH_MIN_INTERVAL_MS = 3000;
 const SMALL_FILE_AWAIT_BYTES = 5 * 1024 * 1024;
+const DOWNLOAD_MAX_RETRIES = 3;
+const DOWNLOAD_RETRY_DELAY_MS = 1200;
+const DEFAULT_MIN_FREE_BYTES = 500 * 1024 * 1024;
+const VIDEO_FILE_RE = /\.(mp4|m4v|mov|mkv|webm)(\?.*)?$/i;
+const VIDEO_DOWNLOAD_CONCURRENCY = 1;
+
+function getAdaptiveDownloadConcurrency(): number {
+  try {
+    const stats = DeviceIdModule?.getStorageStats?.();
+    const freeBytes = Number(stats?.freeBytes || 0);
+    if (!freeBytes || Number.isNaN(freeBytes)) return DOWNLOAD_CONCURRENCY;
+    if (freeBytes < 1 * 1024 * 1024 * 1024) return Math.min(3, DOWNLOAD_CONCURRENCY);
+    if (freeBytes < 3 * 1024 * 1024 * 1024) return Math.min(4, DOWNLOAD_CONCURRENCY);
+    if (freeBytes < 8 * 1024 * 1024 * 1024) return Math.min(6, DOWNLOAD_CONCURRENCY);
+    return DOWNLOAD_CONCURRENCY;
+  } catch {
+    return DOWNLOAD_CONCURRENCY;
+  }
+}
 
 type CacheProgress = {
   received: number;
@@ -22,12 +43,22 @@ type CacheProgress = {
 
 const progressMap: Record<string, CacheProgress> = {};
 const progressListeners = new Set<(path: string, progress: CacheProgress) => void>();
+let downloadConcurrencyOverride: number | null = null;
 
 export function subscribeCacheProgress(
   handler: (path: string, progress: CacheProgress) => void
 ) {
   progressListeners.add(handler);
   return () => progressListeners.delete(handler);
+}
+
+export function setDownloadConcurrencyOverride(value: number | null) {
+  if (value === null || value === undefined) {
+    downloadConcurrencyOverride = null;
+    return;
+  }
+  const safeValue = Number(value);
+  downloadConcurrencyOverride = Number.isFinite(safeValue) ? Math.max(1, safeValue) : null;
 }
 
 export function getCacheProgress(path: string): CacheProgress | null {
@@ -75,6 +106,19 @@ let memoryListCache: MediaItem[] = [];
 let memoryListCacheAtMs = 0;
 let inFlightListRefresh: Promise<MediaItem[]> | null = null;
 const inFlightDownloads = new Map<string, Promise<string | null>>();
+let lastListEtag = "";
+let prioritySection = 0;
+let nonPriorityThrottleMs = 0;
+
+export function setPrioritySection(section: number) {
+  const value = Number(section || 0);
+  prioritySection = Number.isFinite(value) ? Math.max(0, Math.floor(value)) : 0;
+}
+
+export function setNonPriorityThrottleMs(ms: number) {
+  const value = Number(ms || 0);
+  nonPriorityThrottleMs = Number.isFinite(value) ? Math.max(0, Math.floor(value)) : 0;
+}
 
 function mediaItemFingerprint(item: MediaItem): string {
   return [
@@ -104,12 +148,17 @@ function sameMediaList(a: MediaItem[], b: MediaItem[]): boolean {
   return true;
 }
 
-function fetchWithTimeout(url: string, timeoutMs = MEDIA_FETCH_TIMEOUT_MS): Promise<Response> {
+function fetchWithTimeout(
+  url: string,
+  timeoutMs = MEDIA_FETCH_TIMEOUT_MS,
+  headers: Record<string, string> = {}
+): Promise<Response> {
   return Promise.race([
     fetch(url, {
       headers: {
         "Cache-Control": "no-cache",
         Pragma: "no-cache",
+        ...headers,
       },
     }),
     new Promise<Response>((_, reject) =>
@@ -203,6 +252,13 @@ function shouldCacheItem(item: MediaItem): boolean {
   return !!String(item?.url || "").trim();
 }
 
+function isVideoItem(item: MediaItem): boolean {
+  const mime = String(item?.type || "").toLowerCase();
+  if (mime.startsWith("video/")) return true;
+  const name = String(item?.originalName || item?.name || item?.url || "");
+  return VIDEO_FILE_RE.test(name);
+}
+
 function getDownloadKey(item: MediaItem): string {
   return `${String(item.url || "")}|${Number(item.size || 0)}|${Number(item.mtimeMs || 0)}`;
 }
@@ -260,50 +316,56 @@ async function downloadIfNeeded(
   } catch {
     // continue to download
   }
-  try {
-    const download = RNFS.downloadFile({
-      fromUrl: `${remoteUrl}?ts=${Date.now()}`,
-      toFile: targetPath,
-      background: true,
-      discretionary: false,
-      progressInterval: 500,
-      progress: (data) => {
-        const total = Number(data?.contentLength || 0);
-        const received = Number(data?.bytesWritten || 0);
-        if (!total) return;
-        const percent = Math.max(0, Math.min(100, Math.round((received / total) * 100)));
-        emitProgress(remotePath, {
-          total,
-          received,
-          percent,
-          updatedAt: Date.now(),
-        });
-      },
-    });
-    const result = await download.promise;
-    if (result.statusCode < 200 || result.statusCode >= 300) {
-      return entry?.localPath && (await fileExists(entry.localPath)) ? entry.localPath : null;
-    }
+  for (let attempt = 0; attempt < DOWNLOAD_MAX_RETRIES; attempt += 1) {
+    try {
+      const download = RNFS.downloadFile({
+        fromUrl: `${remoteUrl}?ts=${Date.now()}`,
+        toFile: targetPath,
+        background: true,
+        discretionary: false,
+        progressInterval: 500,
+        progress: (data) => {
+          const total = Number(data?.contentLength || 0);
+          const received = Number(data?.bytesWritten || 0);
+          if (!total) return;
+          const percent = Math.max(0, Math.min(100, Math.round((received / total) * 100)));
+          emitProgress(remotePath, {
+            total,
+            received,
+            percent,
+            updatedAt: Date.now(),
+          });
+        },
+      });
+      const result = await download.promise;
+      if (result.statusCode < 200 || result.statusCode >= 300) {
+        throw new Error(`download-http-${result.statusCode}`);
+      }
 
-    const finalStat = await RNFS.stat(targetPath);
-    const finalSize = Number(finalStat?.size || 0);
-    manifest[remotePath] = {
-      url: remotePath,
-      localPath: targetPath,
-      size: expectedSize || finalSize,
-      mtimeMs: expectedMtime,
-      lastSeenAt: Date.now(),
-    };
-    emitProgress(remotePath, {
-      total: expectedSize || finalSize || 0,
-      received: expectedSize || finalSize || 0,
-      percent: 100,
-      updatedAt: Date.now(),
-    });
-    return targetPath;
-  } catch {
-    return entry?.localPath && (await fileExists(entry.localPath)) ? entry.localPath : null;
+      const finalStat = await RNFS.stat(targetPath);
+      const finalSize = Number(finalStat?.size || 0);
+      manifest[remotePath] = {
+        url: remotePath,
+        localPath: targetPath,
+        size: expectedSize || finalSize,
+        mtimeMs: expectedMtime,
+        lastSeenAt: Date.now(),
+      };
+      emitProgress(remotePath, {
+        total: expectedSize || finalSize || 0,
+        received: expectedSize || finalSize || 0,
+        percent: 100,
+        updatedAt: Date.now(),
+      });
+      return targetPath;
+    } catch {
+      if (attempt < DOWNLOAD_MAX_RETRIES - 1) {
+        await new Promise((resolve) => setTimeout(resolve, DOWNLOAD_RETRY_DELAY_MS));
+      }
+    }
   }
+
+  return entry?.localPath && (await fileExists(entry.localPath)) ? entry.localPath : null;
 }
 
 async function downloadIfNeededDeduped(
@@ -327,7 +389,11 @@ async function downloadIfNeededDeduped(
   return task;
 }
 
-async function removeStaleFiles(manifest: ManifestMap, activeUrls: Set<string>) {
+async function removeStaleFiles(
+  manifest: ManifestMap,
+  activeUrls: Set<string>,
+  options: { immediate?: boolean } = {}
+) {
   const now = Date.now();
   const activeList = Array.from(activeUrls);
   const activeCachedChecks = await Promise.all(
@@ -337,7 +403,6 @@ async function removeStaleFiles(manifest: ManifestMap, activeUrls: Set<string>) 
       return await fileExists(entry.localPath);
     })
   );
-  const canPrune = activeCachedChecks.every(Boolean);
 
   for (const url of Object.keys(manifest)) {
     const entry = manifest[url];
@@ -348,10 +413,9 @@ async function removeStaleFiles(manifest: ManifestMap, activeUrls: Set<string>) 
     }
     if (!entry.lastSeenAt) {
       entry.lastSeenAt = now;
-      continue;
+      if (!options.immediate) continue;
     }
-    if (now - Number(entry.lastSeenAt || 0) < CACHE_RETENTION_MS) continue;
-    if (!canPrune) continue;
+    if (!options.immediate && now - Number(entry.lastSeenAt || 0) < CACHE_RETENTION_MS) continue;
 
     // Avoid unlinking immediately; a file can still be in active playback pipeline.
     // Delete only after a retention window to reduce playback risk.
@@ -401,9 +465,15 @@ async function applyManifestToCachedList(list: MediaItem[]): Promise<MediaItem[]
 
 async function runTasksWithConcurrency(
   tasks: Array<() => Promise<void>>,
-  concurrency = DOWNLOAD_CONCURRENCY
+  concurrency = DOWNLOAD_CONCURRENCY,
+  options: { ignoreOverride?: boolean; delayMs?: number } = {}
 ) {
-  const safeConcurrency = Math.max(1, Number(concurrency || 1));
+  const adaptive = getAdaptiveDownloadConcurrency();
+  let safeConcurrency = Math.max(1, Number(concurrency || adaptive || 1));
+  if (!options.ignoreOverride && downloadConcurrencyOverride !== null) {
+    if (downloadConcurrencyOverride === 0) return;
+    safeConcurrency = Math.max(1, Math.min(safeConcurrency, downloadConcurrencyOverride));
+  }
   let cursor = 0;
 
   async function worker() {
@@ -415,6 +485,9 @@ async function runTasksWithConcurrency(
       } catch {
         // no-op
       }
+      if (options.delayMs && options.delayMs > 0) {
+        await new Promise((resolve) => setTimeout(resolve, options.delayMs));
+      }
     }
   }
 
@@ -425,7 +498,7 @@ async function runTasksWithConcurrency(
 async function mapServerListToPlayable(
   serverList: MediaItem[],
   server: string,
-  options: { awaitDownloads?: boolean } = {}
+  options: { awaitDownloads?: boolean; pruneStaleNow?: boolean } = {}
 ): Promise<MediaItem[]> {
   await ensureMediaDirs();
   const manifest = await readManifest();
@@ -441,6 +514,11 @@ async function mapServerListToPlayable(
 
   const resolvedByUrl: Record<string, string> = {};
   const pendingDownloads: Array<() => Promise<void>> = [];
+  const pendingLargeDownloads: Array<() => Promise<void>> = [];
+  const pendingVideoDownloads: Array<() => Promise<void>> = [];
+  const priorityDownloads: Array<() => Promise<void>> = [];
+  const priorityLargeDownloads: Array<() => Promise<void>> = [];
+  const priorityVideoDownloads: Array<() => Promise<void>> = [];
   for (const [path, item] of uniqueByUrl.entries()) {
     const existing = manifest[path];
     if (existing && (await fileExists(existing.localPath))) {
@@ -457,19 +535,27 @@ async function mapServerListToPlayable(
     // Limit caching to reasonable file sizes to avoid memory pressure on TV devices.
     if (shouldCacheItem(item)) {
       const sizeBytes = Number(item?.size || 0);
-      if (sizeBytes > 0 && sizeBytes <= SMALL_FILE_AWAIT_BYTES) {
+      if (options.awaitDownloads && sizeBytes > 0 && sizeBytes <= SMALL_FILE_AWAIT_BYTES) {
         const localPathValue = await downloadIfNeededDeduped(server, item, manifest);
         if (localPathValue) {
           resolvedByUrl[path] = localPathValue;
           continue;
         }
       }
-      pendingDownloads.push(async () => {
+      const task = async () => {
         const localPathValue = await downloadIfNeededDeduped(server, item, manifest);
         if (localPathValue) {
           resolvedByUrl[path] = localPathValue;
         }
-      });
+      };
+      const isPriority = prioritySection > 0 && Number(item?.section || 0) === prioritySection;
+      if (isVideoItem(item)) {
+        (isPriority ? priorityVideoDownloads : pendingVideoDownloads).push(task);
+      } else if (sizeBytes > LARGE_MEDIA_BYTES) {
+        (isPriority ? priorityLargeDownloads : pendingLargeDownloads).push(task);
+      } else {
+        (isPriority ? priorityDownloads : pendingDownloads).push(task);
+      }
     }
   }
 
@@ -489,7 +575,7 @@ async function mapServerListToPlayable(
     };
   });
 
-  await removeStaleFiles(manifest, activeUrls);
+  await removeStaleFiles(manifest, activeUrls, { immediate: !!options.pruneStaleNow });
   await writeManifest(manifest);
   if (!sameMediaList(memoryListCache, mapped)) {
     await writeListCache(mapped);
@@ -497,7 +583,14 @@ async function mapServerListToPlayable(
     memoryListCacheAtMs = Date.now();
   }
 
-  if (!pendingDownloads.length) {
+  if (
+    !pendingDownloads.length &&
+    !pendingLargeDownloads.length &&
+    !pendingVideoDownloads.length &&
+    !priorityDownloads.length &&
+    !priorityLargeDownloads.length &&
+    !priorityVideoDownloads.length
+  ) {
     return mapped;
   }
 
@@ -519,7 +612,24 @@ async function mapServerListToPlayable(
     });
 
   if (options.awaitDownloads) {
-    await runTasksWithConcurrency(pendingDownloads, DOWNLOAD_CONCURRENCY);
+    const orderedDownloads = [...priorityDownloads, ...pendingDownloads];
+    const orderedVideoDownloads = [...priorityVideoDownloads, ...pendingVideoDownloads];
+    const orderedLargeDownloads = [...priorityLargeDownloads, ...pendingLargeDownloads];
+    if (orderedDownloads.length) {
+      await runTasksWithConcurrency(orderedDownloads, DOWNLOAD_CONCURRENCY, {
+        ignoreOverride: true,
+      });
+    }
+    if (orderedVideoDownloads.length) {
+      await runTasksWithConcurrency(orderedVideoDownloads, VIDEO_DOWNLOAD_CONCURRENCY, {
+        ignoreOverride: true,
+      });
+    }
+    if (orderedLargeDownloads.length) {
+      await runTasksWithConcurrency(orderedLargeDownloads, LARGE_MEDIA_CONCURRENCY, {
+        ignoreOverride: true,
+      });
+    }
     const refreshed = buildRefreshed();
     await writeManifest(manifest);
     if (sameMediaList(memoryListCache, refreshed)) {
@@ -530,19 +640,37 @@ async function mapServerListToPlayable(
     return refreshed;
   }
 
-  runTasksWithConcurrency(pendingDownloads, DOWNLOAD_CONCURRENCY)
-    .then(async () => {
-      const refreshed = buildRefreshed();
-      await writeManifest(manifest);
-      if (!sameMediaList(memoryListCache, refreshed)) {
-        await writeListCache(refreshed);
-      } else {
-        memoryListCacheAtMs = Date.now();
-      }
-    })
-    .catch(() => {
-      // no-op
-    });
+  const backgroundSync = async () => {
+    const orderedDownloads = [...priorityDownloads, ...pendingDownloads];
+    const orderedVideoDownloads = [...priorityVideoDownloads, ...pendingVideoDownloads];
+    const orderedLargeDownloads = [...priorityLargeDownloads, ...pendingLargeDownloads];
+    if (orderedDownloads.length) {
+      await runTasksWithConcurrency(orderedDownloads, DOWNLOAD_CONCURRENCY, {
+        delayMs: nonPriorityThrottleMs,
+      });
+    }
+    if (orderedVideoDownloads.length) {
+      await runTasksWithConcurrency(orderedVideoDownloads, VIDEO_DOWNLOAD_CONCURRENCY, {
+        delayMs: nonPriorityThrottleMs,
+      });
+    }
+    if (orderedLargeDownloads.length) {
+      await runTasksWithConcurrency(orderedLargeDownloads, LARGE_MEDIA_CONCURRENCY, {
+        delayMs: nonPriorityThrottleMs,
+      });
+    }
+    const refreshed = buildRefreshed();
+    await writeManifest(manifest);
+    if (!sameMediaList(memoryListCache, refreshed)) {
+      await writeListCache(refreshed);
+    } else {
+      memoryListCacheAtMs = Date.now();
+    }
+  };
+
+  backgroundSync().catch(() => {
+    // no-op
+  });
 
   return mapped;
 }
@@ -555,23 +683,55 @@ function sanitizeCachedList(list: MediaItem[]): MediaItem[] {
   });
 }
 
+function normalizeMediaList(list: MediaItem[]): MediaItem[] {
+  if (!Array.isArray(list) || !list.length) return [];
+  const seen = new Set<string>();
+  const result: MediaItem[] = [];
+  for (const item of list) {
+    if (!item || typeof item !== "object") continue;
+    const url = String(item.url || "").trim();
+    if (!url) continue;
+    const name = String(item.originalName || item.name || "").trim();
+    const size = Number(item.size || 0);
+    const mtime = Number(item.mtimeMs || 0);
+    const section = Number(item.section || 0);
+    const page = Number(item.page || 0);
+    const key = `${url}|${name}|${size}|${mtime}|${section}|${page}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(item);
+  }
+  return result;
+}
+
 async function fetchServerMediaList(server: string): Promise<MediaItem[]> {
   const deviceId = await DeviceIdModule.getDeviceId();
+  const headers: Record<string, string> = {};
+  if (lastListEtag) headers["If-None-Match"] = lastListEtag;
   const res = await fetchWithTimeout(
-    `${server}/media-list?deviceId=${deviceId}&ts=${Date.now()}`
+    `${server}/media-list?deviceId=${deviceId}&ts=${Date.now()}`,
+    MEDIA_FETCH_TIMEOUT_MS,
+    headers
   );
+  if (res.status === 304) {
+    if (memoryListCache.length) return memoryListCache;
+    const cached = normalizeMediaList(sanitizeCachedList(await readListCache()));
+    return cached;
+  }
   if (!res.ok) {
     throw new Error(`media-http-${res.status}`);
   }
+  const etag = res.headers?.get?.("ETag");
+  if (etag) lastListEtag = etag;
   const list = await res.json();
   if (!Array.isArray(list)) return [];
-  return list;
+  return normalizeMediaList(list);
 }
 
 async function loadCachedPlayableList(): Promise<MediaItem[]> {
   if (memoryListCache.length) return memoryListCache;
   try {
-    const cached = sanitizeCachedList(await readListCache());
+    const cached = normalizeMediaList(sanitizeCachedList(await readListCache()));
     const mapped = await applyManifestToCachedList(cached);
     memoryListCache = mapped;
     memoryListCacheAtMs = Date.now();
@@ -583,7 +743,12 @@ async function loadCachedPlayableList(): Promise<MediaItem[]> {
 }
 
 async function refreshPlayableList(
-  options: { blockUntilCached?: boolean; force?: boolean } = {}
+  options: {
+    blockUntilCached?: boolean;
+    blockUntilCachedSmallBytes?: number;
+    pruneStaleNow?: boolean;
+    force?: boolean;
+  } = {}
 ): Promise<MediaItem[]> {
   const now = Date.now();
   const server = getServer();
@@ -600,8 +765,14 @@ async function refreshPlayableList(
 
   inFlightListRefresh = (async () => {
     const list = await fetchServerMediaList(server);
+    const totalBytes = list.reduce((sum, item) => sum + Number(item?.size || 0), 0);
+    const smallLimit = Number(options.blockUntilCachedSmallBytes || 0);
+    const awaitDownloads =
+      !!options.blockUntilCached ||
+      (smallLimit > 0 && totalBytes > 0 && totalBytes <= smallLimit);
     return mapServerListToPlayable(list, server, {
-      awaitDownloads: !!options.blockUntilCached,
+      awaitDownloads,
+      pruneStaleNow: !!options.pruneStaleNow,
     });
   })();
 
@@ -612,7 +783,14 @@ async function refreshPlayableList(
   }
 }
 
-export async function syncMedia(options: { blockUntilCached?: boolean; force?: boolean } = {}) {
+export async function syncMedia(
+  options: {
+    blockUntilCached?: boolean;
+    blockUntilCachedSmallBytes?: number;
+    pruneStaleNow?: boolean;
+    force?: boolean;
+  } = {}
+) {
   try {
     await refreshPlayableList(options);
     return true;
@@ -628,11 +806,149 @@ export async function getMediaFiles(sectionIndex = 0) {
 
   try {
     const mapped = await refreshPlayableList();
-    return mapped.filter((file) => Number(file.section || 0) === sectionNo);
+    const filtered = mapped.filter((file) => Number(file.section || 0) === sectionNo);
+    try {
+      const names = filtered
+        .map((file) => String(file.originalName || file.name || file.url || ""))
+        .filter(Boolean)
+        .slice(0, 25);
+      console.log(
+        "Media list",
+        `section=${sectionNo}`,
+        `count=${filtered.length}`,
+        names.length ? `items=${names.join(" | ")}` : "items=none"
+      );
+    } catch {
+      // ignore logging failures
+    }
+    return filtered;
   } catch (e) {
     console.log("Media list fetch failed, fallback to cache", e);
   }
 
   const cached = await loadCachedPlayableList();
-  return cached.filter((file) => Number(file.section || 0) === sectionNo);
+  const filtered = cached.filter((file) => Number(file.section || 0) === sectionNo);
+  try {
+    const names = filtered
+      .map((file) => String(file.originalName || file.name || file.url || ""))
+      .filter(Boolean)
+      .slice(0, 25);
+    console.log(
+      "Media list (cache)",
+      `section=${sectionNo}`,
+      `count=${filtered.length}`,
+      names.length ? `items=${names.join(" | ")}` : "items=none"
+    );
+  } catch {
+    // ignore logging failures
+  }
+  return filtered;
+}
+
+export async function hasCachedMedia(): Promise<boolean> {
+  try {
+    const list = await readListCache();
+    return Array.isArray(list) && list.length > 0;
+  } catch {
+    return false;
+  }
+}
+
+export async function pruneCacheIfLow(minFreeBytes = DEFAULT_MIN_FREE_BYTES) {
+  try {
+    const stats = DeviceIdModule?.getStorageStats?.();
+    const freeBytes = Number(stats?.freeBytes || 0);
+    if (!freeBytes || freeBytes >= minFreeBytes) return false;
+
+    await ensureMediaDirs();
+    const manifest = await readManifest();
+    const entries = Object.values(manifest).filter((entry) => entry?.localPath);
+    if (!entries.length) return false;
+
+    const sorted = entries.sort(
+      (a, b) => Number(a.lastSeenAt || 0) - Number(b.lastSeenAt || 0)
+    );
+
+    let reclaimed = 0;
+    for (const entry of sorted) {
+      if (!entry?.localPath) continue;
+      try {
+        if (await fileExists(entry.localPath)) {
+          await RNFS.unlink(entry.localPath);
+          reclaimed += Number(entry.size || 0);
+        }
+      } catch {
+        // ignore unlink errors
+      }
+      delete manifest[entry.url];
+      if (freeBytes + reclaimed >= minFreeBytes) break;
+    }
+
+    await writeManifest(manifest);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function prefetchMediaItems(items: MediaItem[]) {
+  try {
+    const server = getServer();
+    if (!server) return;
+    if (!Array.isArray(items) || !items.length) return;
+
+    await ensureMediaDirs();
+    const manifest = await readManifest();
+    const videoTasks: Array<() => Promise<void>> = [];
+    const otherTasks: Array<() => Promise<void>> = [];
+
+    for (const item of items) {
+      if (!shouldCacheItem(item)) continue;
+      const task = async () => {
+        const localPathValue = await downloadIfNeededDeduped(server, item, manifest);
+        if (localPathValue) {
+          // manifest is updated inside downloadIfNeededDeduped/downloadIfNeeded
+        }
+      };
+      if (isVideoItem(item)) {
+        videoTasks.push(task);
+      } else {
+        otherTasks.push(task);
+      }
+    }
+
+    if (otherTasks.length) {
+      await runTasksWithConcurrency(otherTasks, 2);
+    }
+    if (videoTasks.length) {
+      await runTasksWithConcurrency(videoTasks, 1);
+    }
+
+    await writeManifest(manifest);
+  } catch {
+    // ignore prefetch errors
+  }
+}
+
+export async function getCacheSummary() {
+  try {
+    const list = await readListCache();
+    if (!Array.isArray(list) || !list.length) {
+      return { total: 0, cached: 0, percent: 0 };
+    }
+    const manifest = await readManifest();
+    let cached = 0;
+    for (const item of list) {
+      const path = String(item?.url || "");
+      const entry = manifest[path];
+      if (entry?.localPath && (await fileExists(entry.localPath))) {
+        cached += 1;
+      }
+    }
+    const total = list.length;
+    const percent = total ? Math.round((cached / total) * 100) : 0;
+    return { total, cached, percent };
+  } catch {
+    return { total: 0, cached: 0, percent: 0 };
+  }
 }

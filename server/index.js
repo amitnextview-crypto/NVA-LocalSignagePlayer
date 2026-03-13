@@ -39,6 +39,13 @@ app.use(express.json());
 app.use("/media-list", mediaRoutes);
 app.use("/upload", uploadRoutes);
 app.use("/config", configRoutes);
+app.get("/ping", (req, res) => {
+  res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+  res.setHeader("Pragma", "no-cache");
+  res.setHeader("Expires", "0");
+  res.setHeader("Surrogate-Control", "no-store");
+  res.json({ ok: true, time: Date.now() });
+});
 app.use(
   "/",
   express.static(path.join(assetBasePath, "public"), {

@@ -58,6 +58,7 @@ public class NativeVideoPlayerManager extends SimpleViewManager<NativeVideoPlaye
         events.put("topEnd", MapBuilder.of("registrationName", "onEnd"));
         events.put("topError", MapBuilder.of("registrationName", "onError"));
         events.put("topReady", MapBuilder.of("registrationName", "onReady"));
+        events.put("topBuffer", MapBuilder.of("registrationName", "onBuffering"));
         return events;
     }
 }

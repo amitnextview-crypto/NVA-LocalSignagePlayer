@@ -7,6 +7,7 @@ import {
 } from "react-native";
 
 type NativeVideoErrorEvent = NativeSyntheticEvent<{ message?: string }>;
+type NativeVideoBufferEvent = NativeSyntheticEvent<{ buffering?: boolean }>;
 
 type Props = {
   src: string;
@@ -18,6 +19,7 @@ type Props = {
   onEnd?: () => void;
   onReady?: () => void;
   onError?: (event: NativeVideoErrorEvent) => void;
+  onBuffering?: (event: NativeVideoBufferEvent) => void;
 };
 
 const NativeVideoPlayerView = requireNativeComponent<Props>("NativeVideoPlayerView");

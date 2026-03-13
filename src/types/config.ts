@@ -12,6 +12,10 @@ export interface TickerConfig {
   position: 'top' | 'bottom';
 }
 
+export interface CacheConfig {
+  videoMB?: number;
+}
+
 export interface AppConfig {
   layout: 'fullscreen' | 'grid2' | 'grid3';
   orientation:
@@ -25,4 +29,5 @@ export interface AppConfig {
 
   sections: SectionConfig[];
   ticker: TickerConfig;
+  cache?: CacheConfig;
 }

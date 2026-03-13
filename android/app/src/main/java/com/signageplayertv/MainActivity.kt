@@ -143,6 +143,10 @@ override fun onWindowFocusChanged(hasFocus: Boolean) {
     alarmManager.cancel(pendingIntent)
   }
 
+  fun cancelScheduledReopenFromJs() {
+    cancelScheduledReopen()
+  }
+
   private fun buildReopenPendingIntent(): PendingIntent {
     val intent = Intent(this, MainActivity::class.java).apply {
       action = Intent.ACTION_MAIN

@@ -111,7 +111,7 @@
                   <option value="bottom">Top to Bottom</option>
                 </select>
                 <label>Section 1 Duration (sec)</label>
-                <input type="number" id="duration1" min="1" value="5" />
+                <input type="number" id="duration1" min="1" value="7" />
               </div>
               <div id="section2Wrapper" class="section-panel">
                 <label>Section 2 Direction</label>
@@ -122,7 +122,7 @@
                   <option value="bottom">Top to Bottom</option>
                 </select>
                 <label>Section 2 Duration (sec)</label>
-                <input type="number" id="duration2" min="1" value="5" />
+                <input type="number" id="duration2" min="1" value="13" />
               </div>
               <div id="section3Wrapper" class="section-panel">
                 <label>Section 3 Direction</label>
@@ -133,7 +133,7 @@
                   <option value="bottom">Top to Bottom</option>
                 </select>
                 <label>Section 3 Duration (sec)</label>
-                <input type="number" id="duration3" min="1" value="5" />
+                <input type="number" id="duration3" min="1" value="19" />
               </div>
             </div>
           </div>
@@ -229,6 +229,17 @@
                 <label>Fallback Image URL</label>
                 <input type="text" id="scheduleFallbackImageUrl" placeholder="https://example.com/fallback.jpg" />
               </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="card compact-card">
+          <h2>Cache</h2>
+          <p class="section-help">Video cache size on device (MB). Higher helps reduce buffering, lower saves storage.</p>
+          <div class="section-controls-row">
+            <div class="section-panel">
+              <label>Video Cache (MB)</label>
+              <input type="number" id="videoCacheMB" min="256" value="2048" />
             </div>
           </div>
         </section>

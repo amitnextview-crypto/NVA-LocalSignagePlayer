@@ -1,38 +1,41 @@
 {
   "orientation": "horizontal",
-  "layout": "grid3",
-  "grid3Layout": "stack-h",
-  "gridRatio": "1:1:1",
-  "slideDuration": 10,
+  "layout": "grid2",
+  "grid3Layout": "stack-v",
+  "gridRatio": "1:1",
+  "slideDuration": 7,
   "animation": "slide",
   "bgColor": "#000000",
   "sections": [
     {
       "slideDirection": "top",
-      "slideDuration": 10,
+      "slideDuration": 7,
       "sourceType": "multimedia",
       "sourceUrl": ""
     },
     {
       "slideDirection": "top",
-      "slideDuration": 5,
+      "slideDuration": 13,
       "sourceType": "multimedia",
       "sourceUrl": ""
     },
     {
       "slideDirection": "bottom",
-      "slideDuration": 8,
+      "slideDuration": 19,
       "sourceType": "multimedia",
       "sourceUrl": ""
     }
   ],
   "ticker": {
-    "text": "welcome to nextview technologies india",
-    "color": "#ffffff",
-    "bgColor": "#01b6da",
-    "speed": 10,
-    "fontSize": 44,
+    "text": "Breaking News: NextView Premium Product New Update Available!",
+    "color": "#f9f1f1",
+    "bgColor": "#cece0d",
+    "speed": 7,
+    "fontSize": 34,
     "position": "bottom"
+  },
+  "cache": {
+    "videoMB": 2048
   },
   "schedule": {
     "enabled": false,

@@ -23,13 +23,24 @@ import {
   hasLocalActivationForDevice,
   readStoredLicense,
 } from "../services/licenseService";
-import { syncMedia } from "../services/mediaService";
+import {
+  getCacheSummary,
+  hasCachedMedia,
+  pruneCacheIfLow,
+  setDownloadConcurrencyOverride,
+  setNonPriorityThrottleMs,
+  setPrioritySection,
+  syncMedia,
+} from "../services/mediaService";
 import { findCMS, getServer, restoreServerFromStorage } from "../services/serverService";
 
 let socket: Socket | null = null;
 const WATCHDOG_INTERVAL_MS = 5000;
 const WATCHDOG_STALL_MS = 180000;
 const NETWORK_RECOVERY_INTERVAL_MS = 10000;
+const NETWORK_QUALITY_CHECK_INTERVAL_MS = 15000;
+const NETWORK_QUALITY_SLOW_MS = 1800;
+const NETWORK_QUALITY_VERY_SLOW_MS = 3500;
 const SELF_HEAL_SYNC_INTERVAL_MS = 120000;
 const RECONNECT_RETRY_INTERVAL_MS = 10000;
 const AUTO_CLEAR_BOOT_MARKER_KEY = "auto_clear_boot_marker_v1";
@@ -41,6 +52,9 @@ const LICENSE_INIT_RETRY_COUNT = 5;
 const LICENSE_INIT_RETRY_DELAY_MS = 1200;
 const APK_UPDATE_PENDING_KEY = "apk_update_pending_v1";
 const APK_UPDATE_PENDING_MAX_AGE_MS = 1000 * 60 * 60;
+const CACHE_GUARD_INTERVAL_MS = 120000;
+const CACHE_MIN_FREE_BYTES = 1024 * 1024 * 1024;
+const SMALL_CACHE_BLOCK_BYTES = 30 * 1024 * 1024;
 
 type RuntimeErrorInfo = {
   message: string;
@@ -130,12 +144,28 @@ export default function App() {
   const [uploadProcessingBySection, setUploadProcessingBySection] = useState<
     Record<number, string>
   >({});
+  const [uploadCountsBySection, setUploadCountsBySection] = useState<
+    Record<number, { uploaded: number; total: number }>
+  >({});
   const playbackBySectionRef = useRef<Record<number, any>>({});
   const lastMetaRef = useRef<any | null>(null);
   const lastConfigSyncAtRef = useRef("");
   const lastMediaSyncAtRef = useRef("");
   const pendingApkUpdateSuccessRef = useRef<any | null>(null);
   const errorClearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const networkQualityRef = useRef("unknown");
+  const playbackStatsRef = useRef({
+    playbackChanges: 0,
+    playbackErrors: 0,
+    lastTitle: "",
+    lastSection: 0,
+    lastUpdatedAt: "",
+  });
+  const sectionRefreshTimersRef = useRef<Record<number, ReturnType<typeof setTimeout> | null>>({
+    1: null,
+    2: null,
+    3: null,
+  });
 
   const reportRuntimeError = (message: string, detail = "", source = "runtime") => {
     if (errorClearTimerRef.current) {
@@ -441,7 +471,9 @@ export default function App() {
     let watchdogTimer: ReturnType<typeof setInterval> | null = null;
     let healthTimer: ReturnType<typeof setInterval> | null = null;
     let networkRecoveryTimer: ReturnType<typeof setInterval> | null = null;
+    let networkQualityTimer: ReturnType<typeof setInterval> | null = null;
     let selfHealTimer: ReturnType<typeof setInterval> | null = null;
+    let cacheGuardTimer: ReturnType<typeof setInterval> | null = null;
     let reconnectTimer: ReturnType<typeof setInterval> | null = null;
     let initRetryTimer: ReturnType<typeof setTimeout> | null = null;
     let mediaUpdateTimer: ReturnType<typeof setTimeout> | null = null;
@@ -548,6 +580,68 @@ export default function App() {
       networkRecoveryTimer = null;
     };
 
+    const pingServer = async (serverUrl: string, timeoutMs: number) => {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), timeoutMs);
+      const start = Date.now();
+      try {
+        const res = await fetch(`${serverUrl}/ping?ts=${Date.now()}`, {
+          method: "GET",
+          signal: controller.signal,
+          headers: { "Cache-Control": "no-cache", Pragma: "no-cache" },
+        });
+        const latency = Date.now() - start;
+        return res?.ok ? latency : null;
+      } catch {
+        return null;
+      } finally {
+        clearTimeout(timer);
+      }
+    };
+
+    const assessNetworkQuality = async () => {
+      const server = getServer();
+      if (!server) return;
+      const latency = await pingServer(server, NETWORK_QUALITY_VERY_SLOW_MS + 1500);
+      let quality = "good";
+      if (latency === null) {
+        quality = "offline";
+      } else if (latency > NETWORK_QUALITY_VERY_SLOW_MS) {
+        quality = "very-slow";
+      } else if (latency > NETWORK_QUALITY_SLOW_MS) {
+        quality = "slow";
+      }
+
+      if (quality !== networkQualityRef.current) {
+        networkQualityRef.current = quality;
+      }
+
+      if (quality === "offline") {
+        setDownloadConcurrencyOverride(0);
+      } else if (quality === "very-slow") {
+        setDownloadConcurrencyOverride(1);
+      } else if (quality === "slow") {
+        setDownloadConcurrencyOverride(2);
+      } else {
+        setDownloadConcurrencyOverride(null);
+      }
+    };
+
+    const startNetworkQualityLoop = () => {
+      if (networkQualityTimer) return;
+      assessNetworkQuality();
+      networkQualityTimer = setInterval(() => {
+        assessNetworkQuality();
+      }, NETWORK_QUALITY_CHECK_INTERVAL_MS);
+    };
+
+    const stopNetworkQualityLoop = () => {
+      if (!networkQualityTimer) return;
+      clearInterval(networkQualityTimer);
+      networkQualityTimer = null;
+      setDownloadConcurrencyOverride(null);
+    };
+
     const startSelfHealSyncLoop = () => {
       if (selfHealTimer) return;
       selfHealTimer = setInterval(async () => {
@@ -570,6 +664,19 @@ export default function App() {
       if (!selfHealTimer) return;
       clearInterval(selfHealTimer);
       selfHealTimer = null;
+    };
+
+    const startCacheGuardLoop = () => {
+      if (cacheGuardTimer) return;
+      cacheGuardTimer = setInterval(async () => {
+        await pruneCacheIfLow(CACHE_MIN_FREE_BYTES);
+      }, CACHE_GUARD_INTERVAL_MS);
+    };
+
+    const stopCacheGuardLoop = () => {
+      if (!cacheGuardTimer) return;
+      clearInterval(cacheGuardTimer);
+      cacheGuardTimer = null;
     };
 
     const startReconnectLoop = () => {
@@ -650,6 +757,7 @@ export default function App() {
         currentPlaybackBySection: playbackBySectionRef.current,
         lastConfigSyncAt: lastConfigSyncAtRef.current,
         lastMediaSyncAt: lastMediaSyncAtRef.current,
+        playbackStats: playbackStatsRef.current,
         mediaBytes,
         configBytes,
         cacheBytes,
@@ -660,7 +768,11 @@ export default function App() {
     };
 
     const emitDeviceHealthSnapshot = async (appState: string, extra: Record<string, any> = {}) => {
-      const meta = await collectDeviceMeta(extra);
+      const cacheSummary = await getCacheSummary();
+      const meta = await collectDeviceMeta({
+        mediaCacheSummary: cacheSummary,
+        ...extra,
+      });
       lastMetaRef.current = meta;
       emitDeviceHealth(appState, meta);
     };
@@ -685,7 +797,7 @@ export default function App() {
       try {
         await clearRuntimeCacheOnly();
         await emitDeviceHealthSnapshot("clear-cache");
-        await syncMedia({ force: true });
+        await syncMedia({ force: true, blockUntilCachedSmallBytes: SMALL_CACHE_BLOCK_BYTES });
         if (isMounted) {
           setMediaVersion((prev) => prev + 1);
         }
@@ -706,9 +818,11 @@ export default function App() {
           console.log("No CMS found – using cached content if available");
           checkAndRecoverNetwork();
           await restoreServerFromStorage();
-          const cachedConfig = await loadConfig(setConfig);
-          await syncMedia();
-          if (isMounted) {
+        const cachedConfig = await loadConfig(setConfig);
+        await syncMedia({ blockUntilCachedSmallBytes: SMALL_CACHE_BLOCK_BYTES });
+        const cachedMedia = await hasCachedMedia();
+        if (isMounted) {
+          if (cachedConfig || cachedMedia) {
             setConnectTexts(
               cachedConfig
                 ? "CMS offline. Playing cached content"
@@ -716,10 +830,14 @@ export default function App() {
               "Offline playback"
             );
             setReady(true);
+          } else {
+            setConnectTexts("CMS not found. Waiting for server", "Reconnecting...");
+            setReady(false);
           }
-          scheduleInitRetry();
-          return;
         }
+        scheduleInitRetry();
+        return;
+      }
 
         const { DeviceIdModule } = NativeModules;
         const deviceId = await DeviceIdModule.getDeviceId();
@@ -759,7 +877,7 @@ export default function App() {
           lastConfigSyncAtRef.current = new Date().toISOString();
           emitDeviceHealth("syncing-config");
           setConnectTexts("Configuration received. Syncing media catalog", "Syncing media");
-          await syncMedia({ force: true });
+          await syncMedia({ force: true, blockUntilCachedSmallBytes: SMALL_CACHE_BLOCK_BYTES });
           lastMediaSyncAtRef.current = new Date().toISOString();
           await emitDeviceHealthSnapshot("syncing-media");
           setConnectTexts("Setup complete. Starting player", "Ready");
@@ -785,17 +903,32 @@ export default function App() {
         // Media update: refresh slideshow immediately, then sync/cache in background.
         socket.on("media-updated", () => {
           emitDeviceHealth("media-updated-received");
+          if (isMounted) {
+            // Trigger immediate refresh so new uploads start streaming right away.
+            setMediaVersion((prev) => prev + 1);
+          }
           if (mediaUpdateTimer) clearTimeout(mediaUpdateTimer);
           mediaUpdateTimer = setTimeout(async () => {
             mediaUpdateTimer = null;
             try {
-              await syncMedia({ force: true });
+              await syncMedia({
+                force: true,
+                blockUntilCachedSmallBytes: SMALL_CACHE_BLOCK_BYTES,
+                pruneStaleNow: true,
+              });
+              try {
+                const { DeviceIdModule: NativeDeviceModule } = NativeModules as any;
+                if (NativeDeviceModule?.clearVideoCache) {
+                  NativeDeviceModule.clearVideoCache();
+                }
+              } catch {
+              }
               lastMediaSyncAtRef.current = new Date().toISOString();
             } finally {
               if (isMounted) {
                 setMediaVersion((prev) => prev + 1);
               }
-              emitDeviceHealth("media-updated-synced");
+              await emitDeviceHealthSnapshot("media-updated-synced");
             }
           }, MEDIA_UPDATE_DEBOUNCE_MS);
         });
@@ -817,12 +950,23 @@ export default function App() {
 
           const status = String(payload?.status || "").toLowerCase();
           const message = String(payload?.message || "").trim();
+          const total = Number(payload?.total || payload?.count || 0);
+          const uploaded = Number(payload?.uploaded || payload?.done || 0);
+          const countSuffix = total
+            ? ` (${uploaded > 0 ? uploaded : total}/${total})`
+            : "";
 
           if (status === "processing") {
             setUploadProcessingBySection((prev) => ({
               ...prev,
-              [section]: message || "Uploading... Please wait.",
+              [section]: `${message || "Uploading... Please wait."}${countSuffix}`,
             }));
+            if (total > 0) {
+              setUploadCountsBySection((prev) => ({
+                ...prev,
+                [section]: { uploaded, total },
+              }));
+            }
             return;
           }
 
@@ -832,6 +976,40 @@ export default function App() {
               delete next[section];
               return next;
             });
+            setUploadCountsBySection((prev) => {
+              const next = { ...prev };
+              delete next[section];
+              return next;
+            });
+            if (section >= 1 && section <= 3) {
+              const existing = sectionRefreshTimersRef.current[section];
+              if (existing) {
+                clearTimeout(existing);
+              }
+              sectionRefreshTimersRef.current[section] = setTimeout(async () => {
+                sectionRefreshTimersRef.current[section] = null;
+                try {
+                  await syncMedia({
+                    force: true,
+                    blockUntilCachedSmallBytes: SMALL_CACHE_BLOCK_BYTES,
+                    pruneStaleNow: true,
+                  });
+                  try {
+                    const { DeviceIdModule: NativeDeviceModule } = NativeModules as any;
+                    if (NativeDeviceModule?.clearVideoCache) {
+                      NativeDeviceModule.clearVideoCache();
+                    }
+                  } catch {
+                  }
+                  if (isMounted) {
+                    setMediaVersion((prev) => prev + 1);
+                  }
+                  await emitDeviceHealthSnapshot("section-upload-ready", { section });
+                } catch (_e) {
+                  // ignore refresh errors here
+                }
+              }, 400);
+            }
             return;
           }
 
@@ -840,6 +1018,11 @@ export default function App() {
               ...prev,
               [section]: message || "Upload failed. Please try again.",
             }));
+            setUploadCountsBySection((prev) => {
+              const next = { ...prev };
+              delete next[section];
+              return next;
+            });
             return;
           }
         });
@@ -926,7 +1109,9 @@ export default function App() {
     (Immersive as any).on();
     startWatchdog();
     startNetworkRecoveryLoop();
+    startNetworkQualityLoop();
     startSelfHealSyncLoop();
+    startCacheGuardLoop();
     startReconnectLoop();
 
     return () => {
@@ -934,7 +1119,9 @@ export default function App() {
       clearDisconnectRecovery();
       stopWatchdog();
       stopNetworkRecoveryLoop();
+      stopNetworkQualityLoop();
       stopSelfHealSyncLoop();
+      stopCacheGuardLoop();
       stopReconnectLoop();
       if (initRetryTimer) {
         clearTimeout(initRetryTimer);
@@ -964,6 +1151,25 @@ export default function App() {
       }
     };
   }, [bootReady, licenseReady, licensed]);
+
+  useEffect(() => {
+    if (!config) return;
+    try {
+      const rawMb = Number(config?.cache?.videoMB || 0);
+      if (!Number.isFinite(rawMb) || rawMb <= 0) return;
+      const bytes = Math.max(256, rawMb) * 1024 * 1024;
+      const { DeviceIdModule: NativeDeviceModule } = NativeModules as any;
+      if (NativeDeviceModule?.setVideoCacheMaxBytes) {
+        NativeDeviceModule.setVideoCacheMaxBytes(bytes);
+      }
+    } catch {
+    }
+  }, [config]);
+
+  useEffect(() => {
+    // Soft throttle for non-priority sections to keep playback smooth.
+    setNonPriorityThrottleMs(600);
+  }, []);
 
   if (!bootReady) {
     return (
@@ -1092,6 +1298,14 @@ export default function App() {
   const handlePlaybackChange = (payload: any) => {
     const section = Number(payload?.section || 0);
     if (!section) return;
+    setPrioritySection(section);
+    playbackStatsRef.current = {
+      ...playbackStatsRef.current,
+      playbackChanges: playbackStatsRef.current.playbackChanges + 1,
+      lastTitle: String(payload?.title || ""),
+      lastSection: section,
+      lastUpdatedAt: new Date().toISOString(),
+    };
     playbackBySectionRef.current = {
       ...playbackBySectionRef.current,
       [section]: {
@@ -1122,6 +1336,11 @@ export default function App() {
       payload?.mediaType ? `Type: ${payload.mediaType}` : "",
     ].filter(Boolean);
     const detail = detailParts.join(" · ");
+    playbackStatsRef.current = {
+      ...playbackStatsRef.current,
+      playbackErrors: playbackStatsRef.current.playbackErrors + 1,
+      lastUpdatedAt: new Date().toISOString(),
+    };
     reportRuntimeError(message, detail, "player");
   };
 
@@ -1165,6 +1384,7 @@ export default function App() {
             config={safeConfig}
             mediaVersion={mediaVersion}
             uploadProcessingBySection={uploadProcessingBySection}
+            uploadCountsBySection={uploadCountsBySection}
             onPlaybackChange={handlePlaybackChange}
             onPlaybackError={handlePlaybackError}
           />
