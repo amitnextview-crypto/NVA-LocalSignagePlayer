@@ -58,6 +58,7 @@ const APK_UPDATE_PENDING_MAX_AGE_MS = 1000 * 60 * 60;
 const CACHE_GUARD_INTERVAL_MS = 120000;
 const CACHE_MIN_FREE_BYTES = 1024 * 1024 * 1024;
 const SMALL_CACHE_BLOCK_BYTES = 30 * 1024 * 1024;
+const STARTUP_DEFER_MS = 2500;
 
 type RuntimeErrorInfo = {
   message: string;
@@ -563,6 +564,7 @@ export default function App() {
     let cacheGuardTimer: ReturnType<typeof setInterval> | null = null;
     let reconnectTimer: ReturnType<typeof setInterval> | null = null;
     let offlineNoticeTimer: ReturnType<typeof setInterval> | null = null;
+    let deferredStartTimer: ReturnType<typeof setTimeout> | null = null;
     let initRetryTimer: ReturnType<typeof setTimeout> | null = null;
     let mediaUpdateTimer: ReturnType<typeof setTimeout> | null = null;
     let initInProgress = false;
@@ -1000,10 +1002,25 @@ export default function App() {
           lastConfigSyncAtRef.current = new Date().toISOString();
           emitDeviceHealth("syncing-config");
           setConnectTexts("Configuration received. Syncing media catalog", "Syncing media");
-          await syncMedia({ force: true, blockUntilCachedSmallBytes: SMALL_CACHE_BLOCK_BYTES });
-          lastMediaSyncAtRef.current = new Date().toISOString();
-          await emitDeviceHealthSnapshot("syncing-media");
-          setConnectTexts("Setup complete. Starting player", "Ready");
+          const cachedMediaAvailable = await hasCachedMedia();
+          if (cachedMediaAvailable && isMounted) {
+            setConnectTexts("Playing cached content. Syncing in background", "Ready");
+            setReady(true);
+          }
+          try {
+            await syncMedia({
+              force: true,
+              forceHard: true,
+              blockUntilCachedSmallBytes: SMALL_CACHE_BLOCK_BYTES,
+            });
+            lastMediaSyncAtRef.current = new Date().toISOString();
+            await emitDeviceHealthSnapshot("syncing-media");
+          } finally {
+            if (isMounted) {
+              setConnectTexts("Setup complete. Starting player", "Ready");
+              setReady(true);
+            }
+          }
 
           if (healthTimer) clearInterval(healthTimer);
           healthTimer = setInterval(async () => {
@@ -1236,11 +1253,13 @@ export default function App() {
     (Immersive as any).on();
     startWatchdog();
     startNetworkRecoveryLoop();
-    startNetworkQualityLoop();
-    startSelfHealSyncLoop();
-    startCacheGuardLoop();
     startReconnectLoop();
     startOfflineNoticeLoop();
+    deferredStartTimer = setTimeout(() => {
+      startNetworkQualityLoop();
+      startSelfHealSyncLoop();
+      startCacheGuardLoop();
+    }, STARTUP_DEFER_MS);
 
     return () => {
       isMounted = false;
@@ -1252,6 +1271,10 @@ export default function App() {
       stopCacheGuardLoop();
       stopReconnectLoop();
       stopOfflineNoticeLoop();
+      if (deferredStartTimer) {
+        clearTimeout(deferredStartTimer);
+        deferredStartTimer = null;
+      }
       if (initRetryTimer) {
         clearTimeout(initRetryTimer);
         initRetryTimer = null;

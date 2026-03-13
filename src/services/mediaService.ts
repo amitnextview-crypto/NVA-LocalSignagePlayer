@@ -9,6 +9,8 @@ const MEDIA_ROOT = `${MEDIA_DIR}/files`;
 const MANIFEST_PATH = `${MEDIA_DIR}/manifest.json`;
 const LIST_CACHE_PATH = `${MEDIA_DIR}/list-cache.json`;
 const MEDIA_FETCH_TIMEOUT_MS = 2500;
+const MEDIA_FETCH_BACKOFF_BASE_MS = 1500;
+const MEDIA_FETCH_BACKOFF_MAX_MS = 30000;
 const DOWNLOAD_CONCURRENCY = 8;
 const LARGE_MEDIA_BYTES = 300 * 1024 * 1024;
 const LARGE_MEDIA_CONCURRENCY = 1;
@@ -111,6 +113,18 @@ const inFlightDownloads = new Map<string, Promise<string | null>>();
 let lastListEtag = "";
 let prioritySection = 0;
 let nonPriorityThrottleMs = 0;
+let listBackoffFailCount = 0;
+let listBackoffUntilMs = 0;
+let lastBackoffLogAtMs = 0;
+const lastMediaLogAtBySection: Record<number, number> = {};
+const lastMediaLogKeyBySection: Record<number, string> = {};
+
+function getListBackoffDelayMs(): number {
+  const exp = Math.min(listBackoffFailCount, 6);
+  const base = MEDIA_FETCH_BACKOFF_BASE_MS * Math.pow(2, exp);
+  const jitter = Math.floor(Math.random() * 600);
+  return Math.min(MEDIA_FETCH_BACKOFF_MAX_MS, base + jitter);
+}
 
 export function setPrioritySection(section: number) {
   const value = Number(section || 0);
@@ -831,6 +845,7 @@ async function refreshPlayableList(
     blockUntilCachedSmallBytes?: number;
     pruneStaleNow?: boolean;
     force?: boolean;
+    forceHard?: boolean;
   } = {}
 ): Promise<MediaItem[]> {
   const now = Date.now();
@@ -844,19 +859,35 @@ async function refreshPlayableList(
     return memoryListCache;
   }
 
+  if ((!options.force || !options.forceHard) && listBackoffUntilMs && now < listBackoffUntilMs) {
+    return loadCachedPlayableList();
+  }
+
   if (inFlightListRefresh) return inFlightListRefresh;
 
   inFlightListRefresh = (async () => {
-    const list = await fetchServerMediaList(server);
-    const totalBytes = list.reduce((sum, item) => sum + Number(item?.size || 0), 0);
-    const smallLimit = Number(options.blockUntilCachedSmallBytes || 0);
-    const awaitDownloads =
-      !!options.blockUntilCached ||
-      (smallLimit > 0 && totalBytes > 0 && totalBytes <= smallLimit);
-    return mapServerListToPlayable(list, server, {
-      awaitDownloads,
-      pruneStaleNow: !!options.pruneStaleNow,
-    });
+    try {
+      const list = await fetchServerMediaList(server);
+      listBackoffFailCount = 0;
+      listBackoffUntilMs = 0;
+      const totalBytes = list.reduce((sum, item) => sum + Number(item?.size || 0), 0);
+      const smallLimit = Number(options.blockUntilCachedSmallBytes || 0);
+      const awaitDownloads =
+        !!options.blockUntilCached ||
+        (smallLimit > 0 && totalBytes > 0 && totalBytes <= smallLimit);
+      return mapServerListToPlayable(list, server, {
+        awaitDownloads,
+        pruneStaleNow: !!options.pruneStaleNow,
+      });
+    } catch (e) {
+      listBackoffFailCount += 1;
+      listBackoffUntilMs = Date.now() + getListBackoffDelayMs();
+      if (Date.now() - lastBackoffLogAtMs > 5000) {
+        lastBackoffLogAtMs = Date.now();
+        console.log("Media list fetch failed, backing off", e);
+      }
+      return loadCachedPlayableList();
+    }
   })();
 
   try {
@@ -872,6 +903,7 @@ export async function syncMedia(
     blockUntilCachedSmallBytes?: number;
     pruneStaleNow?: boolean;
     force?: boolean;
+    forceHard?: boolean;
   } = {}
 ) {
   try {
@@ -895,12 +927,19 @@ export async function getMediaFiles(sectionIndex = 0) {
         .map((file) => String(file.originalName || file.name || file.url || ""))
         .filter(Boolean)
         .slice(0, 25);
-      console.log(
-        "Media list",
-        `section=${sectionNo}`,
-        `count=${filtered.length}`,
-        names.length ? `items=${names.join(" | ")}` : "items=none"
-      );
+      const key = `${filtered.length}|${names.join("|")}`;
+      const now = Date.now();
+      const lastAt = lastMediaLogAtBySection[sectionNo] || 0;
+      if (key !== lastMediaLogKeyBySection[sectionNo] || now - lastAt > 10000) {
+        lastMediaLogAtBySection[sectionNo] = now;
+        lastMediaLogKeyBySection[sectionNo] = key;
+        console.log(
+          "Media list",
+          `section=${sectionNo}`,
+          `count=${filtered.length}`,
+          names.length ? `items=${names.join(" | ")}` : "items=none"
+        );
+      }
     } catch {
       // ignore logging failures
     }
@@ -916,12 +955,19 @@ export async function getMediaFiles(sectionIndex = 0) {
       .map((file) => String(file.originalName || file.name || file.url || ""))
       .filter(Boolean)
       .slice(0, 25);
-    console.log(
-      "Media list (cache)",
-      `section=${sectionNo}`,
-      `count=${filtered.length}`,
-      names.length ? `items=${names.join(" | ")}` : "items=none"
-    );
+    const key = `cache|${filtered.length}|${names.join("|")}`;
+    const now = Date.now();
+    const lastAt = lastMediaLogAtBySection[sectionNo] || 0;
+    if (key !== lastMediaLogKeyBySection[sectionNo] || now - lastAt > 10000) {
+      lastMediaLogAtBySection[sectionNo] = now;
+      lastMediaLogKeyBySection[sectionNo] = key;
+      console.log(
+        "Media list (cache)",
+        `section=${sectionNo}`,
+        `count=${filtered.length}`,
+        names.length ? `items=${names.join(" | ")}` : "items=none"
+      );
+    }
   } catch {
     // ignore logging failures
   }

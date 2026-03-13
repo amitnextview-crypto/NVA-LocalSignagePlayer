@@ -913,7 +913,9 @@ export default function SlideRenderer({
                   if (isVideoFile(activeItem)) {
                     setUri(localUri);
                     setVideoReloadToken((prev) => prev + 1);
-                  } else {
+                    return;
+                  }
+                  if (!uri) {
                     setUri(localUri);
                   }
                   return;
