@@ -685,7 +685,7 @@ export default function SlideRenderer({
       lastGoodAnyUriRef.current = nextUri;
     }
     setUri(nextUri || "");
-  }, [files, index, server, sourceType, mediaVersion, isListFullyCached]);
+  }, [files, index, server, sourceType, mediaVersion]);
 
   useEffect(() => {
     if (sourceType !== SOURCE_TYPES.multimedia) {
@@ -929,7 +929,9 @@ export default function SlideRenderer({
           // ignore refresh failures
         }
         if (attempt < MAX_RETRIES - 1) {
-          await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS));
+          await new Promise<void>((resolve) => {
+            setTimeout(() => resolve(), RETRY_DELAY_MS);
+          });
         }
       }
     })();
@@ -979,10 +981,17 @@ export default function SlideRenderer({
   useEffect(() => {
     if (sourceType !== SOURCE_TYPES.multimedia) return;
     if (!files.length) return;
-    if (!isListFullyCached) return;
+    const allFilesCached = files.every((entry) => {
+      const pathKey = String(entry?.url || "");
+      const progress = pathKey ? Number(cacheProgressByPath[pathKey] || 0) : 0;
+      const hasLocalPath = !!String(entry?.localPath || "").trim();
+      const hasLocalUri = /^file:\/\//i.test(String(entry?.remoteUrl || ""));
+      return hasLocalPath || hasLocalUri || progress >= 100;
+    });
+    if (!allFilesCached) return;
     // Automatic playlist switch to local once full cache is ready.
     setForceLocalRestart(true);
-  }, [files, sourceType, isListFullyCached]);
+  }, [files, sourceType, cacheProgressByPath]);
 
   useEffect(() => {
     if (sourceType !== SOURCE_TYPES.multimedia) return;
