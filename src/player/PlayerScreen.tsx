@@ -50,12 +50,21 @@ function isScheduleActive(schedule: any): boolean {
 export default function PlayerScreen({
   config,
   mediaVersion,
+  playlistSyncAt,
+  contentResetVersion,
+  sectionPlaybackTimeline,
   uploadProcessingBySection,
   uploadCountsBySection,
   onPlaybackChange,
   onPlaybackError,
 }: any) {
   const [scheduleOn, setScheduleOn] = useState(true);
+  const rendererEpoch = `${Number(mediaVersion || 0)}-${Number(contentResetVersion || 0)}-${Number(playlistSyncAt || 0)}`;
+  const getSectionKey = (sectionIndex: number) => {
+    const timeline = sectionPlaybackTimeline?.[sectionIndex + 1] || null;
+    const cycle = String(timeline?.cycleId || timeline?.syncAt || "none");
+    return `section-${sectionIndex}-${rendererEpoch}-${cycle}`;
+  };
   const tickerHeight = config?.ticker?.text
     ? (config.ticker.fontSize || 24) + 12
     : 0;
@@ -75,10 +84,13 @@ export default function PlayerScreen({
         <View style={{ flex: 1, flexDirection: "row", gap: GRID_GAP }}>
           <View style={{ flex: a, marginRight: GRID_GAP / 2 }}>
             <SlideRenderer
-              key="section-0"
+              key={getSectionKey(0)}
               sectionIndex={0}
               config={config}
               mediaVersion={mediaVersion}
+              playlistSyncAt={playlistSyncAt}
+              contentResetVersion={contentResetVersion}
+              sectionTimeline={sectionPlaybackTimeline?.[1] || null}
               processingMessage={uploadProcessingBySection?.[1] || ""}
               processingCount={uploadCountsBySection?.[1] || null}
               onPlaybackChange={onPlaybackChange}
@@ -87,10 +99,13 @@ export default function PlayerScreen({
           </View>
           <View style={{ flex: b, marginHorizontal: GRID_GAP / 2 }}>
             <SlideRenderer
-              key="section-1"
+              key={getSectionKey(1)}
               sectionIndex={1}
               config={config}
               mediaVersion={mediaVersion}
+              playlistSyncAt={playlistSyncAt}
+              contentResetVersion={contentResetVersion}
+              sectionTimeline={sectionPlaybackTimeline?.[2] || null}
               processingMessage={uploadProcessingBySection?.[2] || ""}
               processingCount={uploadCountsBySection?.[2] || null}
               onPlaybackChange={onPlaybackChange}
@@ -99,10 +114,13 @@ export default function PlayerScreen({
           </View>
           <View style={{ flex: c, marginLeft: GRID_GAP / 2 }}>
             <SlideRenderer
-              key="section-2"
+              key={getSectionKey(2)}
               sectionIndex={2}
               config={config}
               mediaVersion={mediaVersion}
+              playlistSyncAt={playlistSyncAt}
+              contentResetVersion={contentResetVersion}
+              sectionTimeline={sectionPlaybackTimeline?.[3] || null}
               processingMessage={uploadProcessingBySection?.[3] || ""}
               processingCount={uploadCountsBySection?.[3] || null}
               onPlaybackChange={onPlaybackChange}
@@ -120,10 +138,13 @@ export default function PlayerScreen({
           <View style={{ flex: top, flexDirection: "row", gap: GRID_GAP }}>
             <View style={{ flex: 1, marginRight: GRID_GAP / 2 }}>
               <SlideRenderer
-                key="section-0"
+                key={getSectionKey(0)}
               sectionIndex={0}
               config={config}
               mediaVersion={mediaVersion}
+              playlistSyncAt={playlistSyncAt}
+              contentResetVersion={contentResetVersion}
+              sectionTimeline={sectionPlaybackTimeline?.[1] || null}
               processingMessage={uploadProcessingBySection?.[1] || ""}
               processingCount={uploadCountsBySection?.[1] || null}
               onPlaybackChange={onPlaybackChange}
@@ -132,10 +153,13 @@ export default function PlayerScreen({
             </View>
             <View style={{ flex: 1, marginLeft: GRID_GAP / 2 }}>
               <SlideRenderer
-                key="section-1"
+                key={getSectionKey(1)}
               sectionIndex={1}
               config={config}
               mediaVersion={mediaVersion}
+              playlistSyncAt={playlistSyncAt}
+              contentResetVersion={contentResetVersion}
+              sectionTimeline={sectionPlaybackTimeline?.[2] || null}
               processingMessage={uploadProcessingBySection?.[2] || ""}
               processingCount={uploadCountsBySection?.[2] || null}
               onPlaybackChange={onPlaybackChange}
@@ -145,10 +169,13 @@ export default function PlayerScreen({
           </View>
           <View style={{ flex: bottom }}>
             <SlideRenderer
-              key="section-2"
+              key={getSectionKey(2)}
               sectionIndex={2}
               config={config}
               mediaVersion={mediaVersion}
+              playlistSyncAt={playlistSyncAt}
+              contentResetVersion={contentResetVersion}
+              sectionTimeline={sectionPlaybackTimeline?.[3] || null}
               processingMessage={uploadProcessingBySection?.[3] || ""}
               processingCount={uploadCountsBySection?.[3] || null}
               onPlaybackChange={onPlaybackChange}
@@ -165,10 +192,13 @@ export default function PlayerScreen({
         <View style={{ flex: 1, gap: GRID_GAP }}>
           <View style={{ flex: top }}>
             <SlideRenderer
-              key="section-0"
+              key={getSectionKey(0)}
               sectionIndex={0}
               config={config}
               mediaVersion={mediaVersion}
+              playlistSyncAt={playlistSyncAt}
+              contentResetVersion={contentResetVersion}
+              sectionTimeline={sectionPlaybackTimeline?.[1] || null}
               processingMessage={uploadProcessingBySection?.[1] || ""}
               onPlaybackError={onPlaybackError}
             />
@@ -176,20 +206,26 @@ export default function PlayerScreen({
           <View style={{ flex: bottom, flexDirection: "row", gap: GRID_GAP }}>
             <View style={{ flex: 1, marginRight: GRID_GAP / 2 }}>
               <SlideRenderer
-                key="section-1"
+                key={getSectionKey(1)}
                 sectionIndex={1}
                 config={config}
                 mediaVersion={mediaVersion}
+                playlistSyncAt={playlistSyncAt}
+                contentResetVersion={contentResetVersion}
+                sectionTimeline={sectionPlaybackTimeline?.[2] || null}
                 processingMessage={uploadProcessingBySection?.[2] || ""}
                 onPlaybackError={onPlaybackError}
               />
             </View>
             <View style={{ flex: 1, marginLeft: GRID_GAP / 2 }}>
               <SlideRenderer
-                key="section-2"
+                key={getSectionKey(2)}
                 sectionIndex={2}
                 config={config}
                 mediaVersion={mediaVersion}
+                playlistSyncAt={playlistSyncAt}
+                contentResetVersion={contentResetVersion}
+                sectionTimeline={sectionPlaybackTimeline?.[3] || null}
                 processingMessage={uploadProcessingBySection?.[3] || ""}
                 onPlaybackError={onPlaybackError}
               />
@@ -204,10 +240,13 @@ export default function PlayerScreen({
       <View style={{ flex: 1 }}>
         <View style={{ flex: a, marginBottom: GRID_GAP / 2 }}>
           <SlideRenderer
-            key="section-0"
+            key={getSectionKey(0)}
             sectionIndex={0}
             config={config}
             mediaVersion={mediaVersion}
+            playlistSyncAt={playlistSyncAt}
+            contentResetVersion={contentResetVersion}
+            sectionTimeline={sectionPlaybackTimeline?.[1] || null}
             processingMessage={uploadProcessingBySection?.[1] || ""}
             processingCount={uploadCountsBySection?.[1] || null}
             onPlaybackChange={onPlaybackChange}
@@ -216,10 +255,13 @@ export default function PlayerScreen({
         </View>
         <View style={{ flex: b, marginVertical: GRID_GAP / 2 }}>
           <SlideRenderer
-            key="section-1"
+            key={getSectionKey(1)}
             sectionIndex={1}
             config={config}
             mediaVersion={mediaVersion}
+            playlistSyncAt={playlistSyncAt}
+            contentResetVersion={contentResetVersion}
+            sectionTimeline={sectionPlaybackTimeline?.[2] || null}
             processingMessage={uploadProcessingBySection?.[2] || ""}
             processingCount={uploadCountsBySection?.[2] || null}
             onPlaybackChange={onPlaybackChange}
@@ -228,10 +270,13 @@ export default function PlayerScreen({
         </View>
         <View style={{ flex: c, marginTop: GRID_GAP / 2 }}>
           <SlideRenderer
-            key="section-2"
+            key={getSectionKey(2)}
             sectionIndex={2}
             config={config}
             mediaVersion={mediaVersion}
+            playlistSyncAt={playlistSyncAt}
+            contentResetVersion={contentResetVersion}
+            sectionTimeline={sectionPlaybackTimeline?.[3] || null}
             processingMessage={uploadProcessingBySection?.[3] || ""}
             processingCount={uploadCountsBySection?.[3] || null}
             onPlaybackChange={onPlaybackChange}
@@ -251,10 +296,13 @@ export default function PlayerScreen({
         <View style={{ flex: 1, flexDirection: "column", gap: GRID_GAP }}>
           <View style={{ flex: left, marginBottom: GRID_GAP / 2 }}>
             <SlideRenderer
-              key="section-0"
+              key={getSectionKey(0)}
               config={config}
               sectionIndex={0}
               mediaVersion={mediaVersion}
+              playlistSyncAt={playlistSyncAt}
+              contentResetVersion={contentResetVersion}
+              sectionTimeline={sectionPlaybackTimeline?.[1] || null}
               processingMessage={uploadProcessingBySection?.[1] || ""}
               onPlaybackChange={onPlaybackChange}
               onPlaybackError={onPlaybackError}
@@ -262,10 +310,13 @@ export default function PlayerScreen({
           </View>
           <View style={{ flex: right, marginTop: GRID_GAP / 2 }}>
             <SlideRenderer
-              key="section-1"
+              key={getSectionKey(1)}
               config={config}
               sectionIndex={1}
               mediaVersion={mediaVersion}
+              playlistSyncAt={playlistSyncAt}
+              contentResetVersion={contentResetVersion}
+              sectionTimeline={sectionPlaybackTimeline?.[2] || null}
               processingMessage={uploadProcessingBySection?.[2] || ""}
               onPlaybackChange={onPlaybackChange}
               onPlaybackError={onPlaybackError}
@@ -279,10 +330,13 @@ export default function PlayerScreen({
       <View style={{ flex: 1, flexDirection: "row", gap: GRID_GAP }}>
         <View style={{ flex: left, marginRight: GRID_GAP / 2 }}>
           <SlideRenderer
-            key="section-0"
+            key={getSectionKey(0)}
             config={config}
             sectionIndex={0}
             mediaVersion={mediaVersion}
+            playlistSyncAt={playlistSyncAt}
+            contentResetVersion={contentResetVersion}
+            sectionTimeline={sectionPlaybackTimeline?.[1] || null}
             processingMessage={uploadProcessingBySection?.[1] || ""}
             onPlaybackChange={onPlaybackChange}
               onPlaybackError={onPlaybackError}
@@ -290,10 +344,13 @@ export default function PlayerScreen({
         </View>
         <View style={{ flex: right, marginLeft: GRID_GAP / 2 }}>
           <SlideRenderer
-            key="section-1"
+            key={getSectionKey(1)}
             config={config}
             sectionIndex={1}
             mediaVersion={mediaVersion}
+            playlistSyncAt={playlistSyncAt}
+            contentResetVersion={contentResetVersion}
+            sectionTimeline={sectionPlaybackTimeline?.[2] || null}
             processingMessage={uploadProcessingBySection?.[2] || ""}
             onPlaybackChange={onPlaybackChange}
               onPlaybackError={onPlaybackError}
@@ -390,10 +447,13 @@ export default function PlayerScreen({
       >
         {config.layout === "fullscreen" && (
           <SlideRenderer
-            key="section-0"
+            key={getSectionKey(0)}
             config={config}
             sectionIndex={0}
             mediaVersion={mediaVersion}
+            playlistSyncAt={playlistSyncAt}
+            contentResetVersion={contentResetVersion}
+            sectionTimeline={sectionPlaybackTimeline?.[1] || null}
             processingMessage={uploadProcessingBySection?.[1] || ""}
             processingCount={uploadCountsBySection?.[1] || null}
             onPlaybackChange={onPlaybackChange}

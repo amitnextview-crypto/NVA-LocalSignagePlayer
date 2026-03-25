@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import {
   Animated,
   Dimensions,
+  NativeEventEmitter,
   Easing,
   NativeModules,
   Pressable,
@@ -27,6 +28,7 @@ import {
   getCacheSummary,
   hasCachedMedia,
   pruneCacheIfLow,
+  resetMediaRuntimeState,
   setDownloadConcurrencyOverride,
   setNonPriorityThrottleMs,
   setPrioritySection,
@@ -59,12 +61,15 @@ const CACHE_GUARD_INTERVAL_MS = 120000;
 const CACHE_MIN_FREE_BYTES = 1024 * 1024 * 1024;
 const SMALL_CACHE_BLOCK_BYTES = 30 * 1024 * 1024;
 const STARTUP_DEFER_MS = 2500;
+const MAX_DIAGNOSTIC_EVENTS = 24;
+const DEVICE_META_CACHE_MS = 30000;
 
 type RuntimeErrorInfo = {
   message: string;
   detail?: string;
   source?: string;
   time: string;
+  silent?: boolean;
 };
 
 class PlayerErrorBoundary extends React.Component<
@@ -102,10 +107,10 @@ class PlayerErrorBoundary extends React.Component<
 }
 
 function wait(ms: number) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+  return new Promise<void>((resolve) => setTimeout(() => resolve(), ms));
 }
 
-async function getPathSizeSafe(targetPath: string) {
+async function getPathSizeSafe(targetPath: string): Promise<number> {
   try {
     const exists = await RNFS.exists(targetPath);
     if (!exists) return 0;
@@ -114,10 +119,10 @@ async function getPathSizeSafe(targetPath: string) {
       return Number(stat.size || 0);
     }
     const entries = await RNFS.readDir(targetPath);
-    const sizes = await Promise.all(
+    const sizes: number[] = await Promise.all(
       entries.map((entry) => getPathSizeSafe(entry.path))
     );
-    return sizes.reduce((sum, size) => sum + Number(size || 0), 0);
+    return sizes.reduce((sum: number, size: number) => sum + Number(size || 0), 0);
   } catch {
     return 0;
   }
@@ -152,6 +157,21 @@ export default function App() {
   const [uploadCountsBySection, setUploadCountsBySection] = useState<
     Record<number, { uploaded: number; total: number }>
   >({});
+  const [playlistSyncAt, setPlaylistSyncAt] = useState(0);
+  const [contentResetVersion, setContentResetVersion] = useState(0);
+  const [sectionPlaybackTimeline, setSectionPlaybackTimeline] = useState<Record<number, any>>({});
+  const [apkUpdateState, setApkUpdateState] = useState<{
+    status: string;
+    message: string;
+    percent: number;
+    visible: boolean;
+  }>({
+    status: "",
+    message: "",
+    percent: 0,
+    visible: false,
+  });
+  const socketUrlRef = useRef("");
   const playbackBySectionRef = useRef<Record<number, any>>({});
   const lastMetaRef = useRef<any | null>(null);
   const lastConfigSyncAtRef = useRef("");
@@ -159,6 +179,7 @@ export default function App() {
   const pendingApkUpdateSuccessRef = useRef<any | null>(null);
   const errorClearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const offlineNoticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastPlaybackHealthEmitAtRef = useRef(0);
   const networkQualityRef = useRef("unknown");
   const playbackStatsRef = useRef({
     playbackChanges: 0,
@@ -172,24 +193,54 @@ export default function App() {
     2: null,
     3: null,
   });
+  const diagnosticEventsRef = useRef<Array<{ time: string; type: string; message: string }>>([]);
+  const deviceMetaCacheRef = useRef<{
+    at: number;
+    mediaBytes: number;
+    configBytes: number;
+    cacheBytes: number;
+  }>({
+    at: 0,
+    mediaBytes: 0,
+    configBytes: 0,
+    cacheBytes: 0,
+  });
+
+  const pushDiagnosticEvent = (type: string, message: string) => {
+    diagnosticEventsRef.current = [
+      ...diagnosticEventsRef.current,
+      {
+        time: new Date().toISOString(),
+        type: String(type || "runtime"),
+        message: String(message || "").slice(0, 240),
+      },
+    ].slice(-MAX_DIAGNOSTIC_EVENTS);
+  };
 
   const reportRuntimeError = (message: string, detail = "", source = "runtime") => {
+    pushDiagnosticEvent(source, detail ? `${message} | ${detail}` : message);
     if (errorClearTimerRef.current) {
       clearTimeout(errorClearTimerRef.current);
       errorClearTimerRef.current = null;
     }
+    const silent = source === "player";
     const friendlyMessage =
       source === "player"
         ? String(message || "Playback error")
         : "Something went wrong. Player will try to recover.";
     const friendlyDetail = detail ? String(detail) : "";
 
-    setLastError({
-      message: friendlyMessage,
-      detail: friendlyDetail,
-      source,
-      time: new Date().toISOString(),
-    });
+    if (!silent) {
+      setLastError({
+        message: friendlyMessage,
+        detail: friendlyDetail,
+        source,
+        time: new Date().toISOString(),
+        silent,
+      });
+    } else {
+      setLastError((current) => (current?.source === "player" ? null : current));
+    }
     if (socket?.connected) {
       socket.emit("device-error", {
         deviceId: deviceIdRef.current,
@@ -197,11 +248,12 @@ export default function App() {
         message: detail ? `${message} | ${detail}` : message,
       });
     }
-    // Auto-clear after a while to avoid blocking playback forever.
-    errorClearTimerRef.current = setTimeout(() => {
-      setLastError(null);
-      errorClearTimerRef.current = null;
-    }, 20000);
+    if (!silent) {
+      errorClearTimerRef.current = setTimeout(() => {
+        setLastError(null);
+        errorClearTimerRef.current = null;
+      }, 20000);
+    }
   };
 
   async function clearRuntimePlaybackData() {
@@ -234,6 +286,58 @@ export default function App() {
     if (!(await RNFS.exists(cachePath))) return;
     const entries = await RNFS.readDir(cachePath);
     await Promise.allSettled(entries.map((entry) => RNFS.unlink(entry.path)));
+  }
+
+  async function clearPersistedPlaybackState() {
+    try {
+      const keys = await AsyncStorage.getAllKeys();
+      const playbackKeys = keys.filter((key) => String(key || "").startsWith("playback:"));
+      if (playbackKeys.length) {
+        await AsyncStorage.multiRemove(playbackKeys);
+      }
+    } catch {
+      // ignore cleanup errors
+    }
+  }
+
+  function resetRuntimePlaybackSnapshots() {
+    playbackBySectionRef.current = {};
+    playbackStatsRef.current = {
+      ...playbackStatsRef.current,
+      playbackChanges: 0,
+      lastTitle: "",
+      lastSection: 0,
+      lastUpdatedAt: new Date().toISOString(),
+    };
+    if (socket?.connected && lastMetaRef.current) {
+      socket.emit("device-health", {
+        deviceId: deviceIdRef.current,
+        appState: "playback-reset",
+        meta: {
+          ...lastMetaRef.current,
+          currentPlaybackBySection: {},
+        },
+      });
+    }
+  }
+
+  function normalizePlaybackTimeline(raw: any) {
+    const sections = raw?.sections && typeof raw.sections === "object" ? raw.sections : {};
+    const next: Record<number, any> = {};
+    for (const [key, value] of Object.entries(sections)) {
+      const section = Number(key || 0);
+      if (!section) continue;
+      next[section] = value;
+    }
+    return next;
+  }
+
+  function mergePlaybackTimeline(section: number, timeline: any) {
+    if (!section || !timeline) return;
+    setSectionPlaybackTimeline((current) => ({
+      ...current,
+      [section]: timeline,
+    }));
   }
 
   async function clearOldCachedMediaExceptActive() {
@@ -382,7 +486,7 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    const ErrorUtils = (global as any)?.ErrorUtils;
+    const ErrorUtils = (globalThis as any)?.ErrorUtils;
     if (!ErrorUtils?.setGlobalHandler) return;
 
     const prevHandler = ErrorUtils.getGlobalHandler ? ErrorUtils.getGlobalHandler() : null;
@@ -398,6 +502,31 @@ export default function App() {
       if (typeof prevHandler === "function") {
         ErrorUtils.setGlobalHandler(prevHandler);
       }
+    };
+  }, []);
+
+  useEffect(() => {
+    const nativeDeviceModule = (NativeModules as any)?.DeviceIdModule;
+    if (!nativeDeviceModule) return;
+    const emitter = new NativeEventEmitter(nativeDeviceModule);
+    const sub = emitter.addListener("apkUpdateProgress", (payload: any) => {
+      const status = String(payload?.status || "").trim();
+      const message = String(payload?.message || "").trim();
+      const percent = Math.max(0, Math.min(100, Number(payload?.percent || 0)));
+      const detail = String(payload?.detail || "").trim();
+      pushDiagnosticEvent("apk-update", detail ? `${status}: ${detail}` : `${status}: ${message}`);
+      setApkUpdateState({
+        status,
+        message: message || "Updating app...",
+        percent,
+        visible: status !== "hidden",
+      });
+      if (status === "error" && detail) {
+        reportRuntimeError("APK update failed", detail, "apk-update");
+      }
+    });
+    return () => {
+      sub.remove();
     };
   }, []);
 
@@ -568,6 +697,7 @@ export default function App() {
     let initRetryTimer: ReturnType<typeof setTimeout> | null = null;
     let mediaUpdateTimer: ReturnType<typeof setTimeout> | null = null;
     let initInProgress = false;
+    let reconnectMissCount = 0;
     let lastWatchdogTick = Date.now();
     const setConnectTexts = (subtitle: string, status: string) => {
       if (!isMounted) return;
@@ -804,15 +934,49 @@ export default function App() {
       cacheGuardTimer = null;
     };
 
+    const resetSocketConnection = () => {
+      try {
+        if (socket) {
+          socket.removeAllListeners();
+          socket.disconnect();
+        }
+      } catch {
+      }
+      socket = null;
+      socketUrlRef.current = "";
+    };
+
     const startReconnectLoop = () => {
       if (reconnectTimer) return;
       reconnectTimer = setInterval(async () => {
         if (!isMounted || initInProgress) return;
-        if (socket?.connected) return;
+        if (socket?.connected) {
+          reconnectMissCount = 0;
+          return;
+        }
         try {
-          if (socket && !socket.connected) {
+          const restoredUrl = await restoreServerFromStorage();
+          const preferredUrl = restoredUrl || socketUrlRef.current || getServer();
+          reconnectMissCount += 1;
+          if (
+            socket &&
+            !socket.connected &&
+            reconnectMissCount <= 2 &&
+            (!preferredUrl || preferredUrl === socketUrlRef.current)
+          ) {
             socket.connect();
             return;
+          }
+          const discoveredUrl = preferredUrl || (await findCMS());
+          if (
+            discoveredUrl &&
+            socket &&
+            socketUrlRef.current &&
+            discoveredUrl !== socketUrlRef.current
+          ) {
+            resetSocketConnection();
+          } else if (socket && reconnectMissCount >= 3) {
+            resetSocketConnection();
           }
         } catch {
         }
@@ -852,7 +1016,10 @@ export default function App() {
       });
     };
 
-    const collectDeviceMeta = async (extra: Record<string, any> = {}) => {
+    const collectDeviceMeta = async (
+      extra: Record<string, any> = {},
+      options: { forceStorageScan?: boolean } = {}
+    ) => {
       const nativeDeviceModule = (NativeModules as any)?.DeviceIdModule;
       let storageStats = { freeBytes: 0, totalBytes: 0 };
       let appVersion = "";
@@ -871,15 +1038,34 @@ export default function App() {
       } catch {
       }
 
-      const mediaBytes = await getPathSizeSafe(`${RNFS.DocumentDirectoryPath}/media`);
-      const configBytes = await getPathSizeSafe(`${RNFS.DocumentDirectoryPath}/config.json`);
-      const cacheBytes = await getPathSizeSafe(RNFS.CachesDirectoryPath);
+      const now = Date.now();
+      const shouldRefreshStorage =
+        !!options.forceStorageScan ||
+        now - Number(deviceMetaCacheRef.current.at || 0) > DEVICE_META_CACHE_MS;
+      if (shouldRefreshStorage) {
+        const mediaBytes = await getPathSizeSafe(`${RNFS.DocumentDirectoryPath}/media`);
+        const configBytes = await getPathSizeSafe(`${RNFS.DocumentDirectoryPath}/config.json`);
+        const cacheBytes = await getPathSizeSafe(RNFS.CachesDirectoryPath);
+        deviceMetaCacheRef.current = {
+          at: now,
+          mediaBytes,
+          configBytes,
+          cacheBytes,
+        };
+      }
+
+      const {
+        mediaBytes,
+        configBytes,
+        cacheBytes,
+      } = deviceMetaCacheRef.current;
 
       return {
         appVersion,
         licensed,
         server: getServer(),
         currentPlaybackBySection: playbackBySectionRef.current,
+        recentDiagnostics: diagnosticEventsRef.current,
         lastConfigSyncAt: lastConfigSyncAtRef.current,
         lastMediaSyncAt: lastMediaSyncAtRef.current,
         playbackStats: playbackStatsRef.current,
@@ -892,12 +1078,16 @@ export default function App() {
       };
     };
 
-    const emitDeviceHealthSnapshot = async (appState: string, extra: Record<string, any> = {}) => {
+    const emitDeviceHealthSnapshot = async (
+      appState: string,
+      extra: Record<string, any> = {},
+      options: { forceStorageScan?: boolean } = {}
+    ) => {
       const cacheSummary = await getCacheSummary();
       const meta = await collectDeviceMeta({
         mediaCacheSummary: cacheSummary,
         ...extra,
-      });
+      }, options);
       lastMetaRef.current = meta;
       emitDeviceHealth(appState, meta);
     };
@@ -906,10 +1096,16 @@ export default function App() {
       console.log("Clear data command received");
 
       try {
+        const { DeviceIdModule: NativeDeviceModule } = NativeModules as any;
+        if (NativeDeviceModule?.setAutoReopenEnabled) {
+          NativeDeviceModule.setAutoReopenEnabled(false);
+        }
+        resetRuntimePlaybackSnapshots();
         await clearRuntimePlaybackData();
+        setSectionPlaybackTimeline({});
 
         console.log("Data cleared");
-        await emitDeviceHealthSnapshot("clear-data");
+        await emitDeviceHealthSnapshot("clear-data", {}, { forceStorageScan: true });
         const { DevSettings } = require("react-native");
         DevSettings.reload();
       } catch (e) {
@@ -921,7 +1117,7 @@ export default function App() {
     const onClearCache = async () => {
       try {
         await clearRuntimeCacheOnly();
-        await emitDeviceHealthSnapshot("clear-cache");
+        await emitDeviceHealthSnapshot("clear-cache", {}, { forceStorageScan: true });
         await syncMedia({ force: true, blockUntilCachedSmallBytes: SMALL_CACHE_BLOCK_BYTES });
         if (isMounted) {
           setMediaVersion((prev) => prev + 1);
@@ -936,33 +1132,47 @@ export default function App() {
       initInProgress = true;
       try {
         await restoreServerFromStorage();
-        if (ENABLE_NETWORK_RECOVERY_LOOP) checkAndRecoverNetwork();
-        setConnectTexts("Scanning local network for CMS server", "Network scan running");
-        const url = await findCMS();
-        if (!url) {
-          console.log("No CMS found – using cached content if available");
-          if (ENABLE_NETWORK_RECOVERY_LOOP) checkAndRecoverNetwork();
-          await restoreServerFromStorage();
+        const restoredServer = getServer();
         const cachedConfig = await loadConfig(setConfig);
         await syncMedia({ blockUntilCachedSmallBytes: SMALL_CACHE_BLOCK_BYTES });
         const cachedMedia = await hasCachedMedia();
-        if (isMounted) {
-          if (cachedConfig || cachedMedia) {
-            setConnectTexts(
-              cachedConfig
-                ? "CMS offline. Playing cached content"
-                : "CMS not found. Playing cached content",
-              "Offline playback"
-            );
-            setReady(true);
-          } else {
-            setConnectTexts("CMS not found. Showing empty player", "Offline");
-            setReady(true);
-          }
+        if (isMounted && (cachedConfig || cachedMedia)) {
+          setConnectTexts(
+            restoredServer
+              ? "Saved CMS found. Opening cached content while reconnecting"
+              : "CMS offline. Playing cached content",
+            "Offline playback"
+          );
+          setReady(true);
         }
-        scheduleInitRetry();
-        return;
-      }
+        if (ENABLE_NETWORK_RECOVERY_LOOP) checkAndRecoverNetwork();
+        if (restoredServer) {
+          setConnectTexts(`Reconnecting to saved CMS at ${restoredServer}`, "Reconnecting");
+        } else {
+          setConnectTexts("Scanning local network for CMS server", "Network scan running");
+        }
+        const url = restoredServer || (await findCMS());
+        if (!url) {
+          pushDiagnosticEvent("cms", "CMS not found. Using cached playback");
+          console.log("No CMS found – using cached content if available");
+          if (ENABLE_NETWORK_RECOVERY_LOOP) checkAndRecoverNetwork();
+          if (isMounted) {
+            if (cachedConfig || cachedMedia) {
+              setConnectTexts(
+                cachedConfig
+                  ? "CMS offline. Playing cached content"
+                  : "CMS not found. Playing cached content",
+                "Offline playback"
+              );
+              setReady(true);
+            } else {
+              setConnectTexts("CMS not found. Showing empty player", "Offline");
+              setReady(true);
+            }
+          }
+          scheduleInitRetry();
+          return;
+        }
 
         const { DeviceIdModule } = NativeModules;
         const deviceId = await DeviceIdModule.getDeviceId();
@@ -978,23 +1188,24 @@ export default function App() {
           reconnectionAttempts: Infinity,
           reconnectionDelay: 3000,
         });
+        socketUrlRef.current = url;
 
         socket.on("connect", async () => {
+          reconnectMissCount = 0;
+          pushDiagnosticEvent("socket", `Connected to ${url}`);
           console.log("Connected:", deviceId);
           stopReconnectLoop();
           clearDisconnectRecovery();
           socket?.emit("register-device", deviceId);
-          await emitDeviceHealthSnapshot("connected", { phase: "socket-connected" });
+          await emitDeviceHealthSnapshot("connected", { phase: "socket-connected" }, { forceStorageScan: true });
           setConnectTexts("Connected. Downloading device configuration", "Syncing config");
 
           const loadedConfig = await loadConfig(setConfig);
+          setSectionPlaybackTimeline(normalizePlaybackTimeline(loadedConfig?.playbackTimeline));
           if (!loadedConfig) {
             emitDeviceError("config", "Config unavailable from server and local cache");
             setConnectTexts("Config unavailable. Retrying automatically", "Config retry");
-            if (socket) {
-              socket.disconnect();
-              socket = null;
-            }
+            resetSocketConnection();
             if (isMounted) setReady(false);
             scheduleInitRetry();
             return;
@@ -1014,7 +1225,7 @@ export default function App() {
               blockUntilCachedSmallBytes: SMALL_CACHE_BLOCK_BYTES,
             });
             lastMediaSyncAtRef.current = new Date().toISOString();
-            await emitDeviceHealthSnapshot("syncing-media");
+            await emitDeviceHealthSnapshot("syncing-media", {}, { forceStorageScan: true });
           } finally {
             if (isMounted) {
               setConnectTexts("Setup complete. Starting player", "Ready");
@@ -1033,7 +1244,7 @@ export default function App() {
                 status: "success",
                 ...pendingApkUpdateSuccessRef.current,
               },
-            });
+            }, { forceStorageScan: true });
             pendingApkUpdateSuccessRef.current = null;
           }
 
@@ -1041,36 +1252,44 @@ export default function App() {
         });
 
         // Media update: refresh slideshow immediately, then sync/cache in background.
-        socket.on("media-updated", () => {
+        socket.on("media-updated", (payload) => {
+          const syncAt = Number(payload?.syncAt || 0);
+          const section = Number(payload?.section || 0);
+          if (section && payload?.timeline) {
+            mergePlaybackTimeline(section, payload.timeline);
+          }
+          if (syncAt > Date.now()) {
+            setPlaylistSyncAt(syncAt);
+          } else {
+            setPlaylistSyncAt(Date.now());
+          }
           emitDeviceHealth("media-updated-received");
           if (isMounted) {
             // Trigger immediate refresh so new uploads start streaming right away.
             setMediaVersion((prev) => prev + 1);
           }
           if (mediaUpdateTimer) clearTimeout(mediaUpdateTimer);
-          mediaUpdateTimer = setTimeout(async () => {
-            mediaUpdateTimer = null;
-            try {
-              await syncMedia({
-                force: true,
-                blockUntilCachedSmallBytes: SMALL_CACHE_BLOCK_BYTES,
-                pruneStaleNow: true,
-              });
-              await clearRuntimeTransientCache();
-              await clearOldCachedMediaExceptActive();
+            mediaUpdateTimer = setTimeout(async () => {
+              mediaUpdateTimer = null;
               try {
-                const { DeviceIdModule: NativeDeviceModule } = NativeModules as any;
-                if (NativeDeviceModule?.clearVideoCache) {
-                  NativeDeviceModule.clearVideoCache();
-                }
-              } catch {
-              }
+                await clearPersistedPlaybackState();
+                resetRuntimePlaybackSnapshots();
+                setContentResetVersion((prev) => prev + 1);
+                await resetMediaRuntimeState({ clearListCache: true });
+                await syncMedia({
+                  force: true,
+                  forceHard: true,
+                  blockUntilCachedSmallBytes: SMALL_CACHE_BLOCK_BYTES,
+                  pruneStaleNow: true,
+                });
+                await clearRuntimeTransientCache();
+                await clearOldCachedMediaExceptActive();
               lastMediaSyncAtRef.current = new Date().toISOString();
             } finally {
               if (isMounted) {
                 setMediaVersion((prev) => prev + 1);
               }
-              await emitDeviceHealthSnapshot("media-updated-synced");
+              await emitDeviceHealthSnapshot("media-updated-synced", {}, { forceStorageScan: true });
             }
           }, MEDIA_UPDATE_DEBOUNCE_MS);
         });
@@ -1079,6 +1298,7 @@ export default function App() {
         socket.on("config-updated", async () => {
           const loadedConfig = await loadConfig(setConfig);
           if (loadedConfig) {
+            setSectionPlaybackTimeline(normalizePlaybackTimeline(loadedConfig?.playbackTimeline));
             lastConfigSyncAtRef.current = new Date().toISOString();
             emitDeviceHealth("config-updated");
           } else {
@@ -1131,24 +1351,30 @@ export default function App() {
               sectionRefreshTimersRef.current[section] = setTimeout(async () => {
                 sectionRefreshTimersRef.current[section] = null;
                 try {
+                await clearPersistedPlaybackState();
+                resetRuntimePlaybackSnapshots();
+                if (section) {
+                  mergePlaybackTimeline(section, {
+                    section,
+                    syncAt: Date.now(),
+                    cycleId: `local-${section}-${Date.now()}`,
+                  });
+                }
+                setContentResetVersion((prev) => prev + 1);
+                  await resetMediaRuntimeState({ clearListCache: true });
                   await syncMedia({
                     force: true,
+                    forceHard: true,
                     blockUntilCachedSmallBytes: SMALL_CACHE_BLOCK_BYTES,
                     pruneStaleNow: true,
                   });
                   await clearRuntimeTransientCache();
                   await clearOldCachedMediaExceptActive();
-                  try {
-                    const { DeviceIdModule: NativeDeviceModule } = NativeModules as any;
-                    if (NativeDeviceModule?.clearVideoCache) {
-                      NativeDeviceModule.clearVideoCache();
-                    }
-                  } catch {
-                  }
                   if (isMounted) {
+                    setPlaylistSyncAt(Date.now());
                     setMediaVersion((prev) => prev + 1);
                   }
-                  await emitDeviceHealthSnapshot("section-upload-ready", { section });
+                  await emitDeviceHealthSnapshot("section-upload-ready", { section }, { forceStorageScan: true });
                 } catch (_e) {
                   // ignore refresh errors here
                 }
@@ -1177,7 +1403,14 @@ export default function App() {
         socket.on("install-app-update", async (payload) => {
           try {
             const nativeDeviceModule = (NativeModules as any)?.DeviceIdModule;
-            const apkUrl = String(payload?.apkUrl || "").trim();
+            const rawApkUrl = String(payload?.apkUrl || "").trim();
+            const serverBase = String(getServer() || "").trim();
+            const apkUrl =
+              rawApkUrl && /^https?:\/\//i.test(rawApkUrl)
+                ? rawApkUrl
+                : rawApkUrl && serverBase
+                ? `${serverBase}${rawApkUrl.startsWith("/") ? rawApkUrl : `/${rawApkUrl}`}`
+                : "";
             if (!apkUrl || !nativeDeviceModule?.installApkUpdate) {
               throw new Error("APK update not available");
             }
@@ -1197,7 +1430,7 @@ export default function App() {
                 previousVersion,
                 requestedAt: new Date().toISOString(),
               },
-            });
+            }, { forceStorageScan: true });
             nativeDeviceModule.installApkUpdate(apkUrl);
           } catch (e) {
             emitDeviceError("install-app-update", String((e as any)?.message || e));
@@ -1216,19 +1449,23 @@ export default function App() {
           }
         });
         socket.on("disconnect", (reason) => {
+          pushDiagnosticEvent("socket", `Disconnected: ${String(reason)}`);
           setConnectTexts(
             `Connection lost (${String(reason)}). Continuing cached playback`,
             "Offline mode"
           );
+          reconnectMissCount = 0;
           startReconnectLoop();
           startDisconnectRecovery(`disconnect:${String(reason)}`);
         });
         socket.on("connect_error", (err) => {
+          pushDiagnosticEvent("socket", `Connect error: ${String(err?.message || "unknown")}`);
           if (ENABLE_NETWORK_RECOVERY_LOOP) checkAndRecoverNetwork();
           setConnectTexts(
             "Socket unavailable. Continuing cached playback",
             "Offline mode"
           );
+          reconnectMissCount = Math.max(reconnectMissCount, 1);
           startReconnectLoop();
           emitDeviceError("connect-error", err?.message || "unknown");
           startDisconnectRecovery(`connect_error:${err?.message || "unknown"}`);
@@ -1303,8 +1540,9 @@ export default function App() {
         socket.off("section-upload-status");
         socket.off("disconnect");
         socket.off("connect_error");
-        socket.disconnect();
+        resetSocketConnection();
       }
+      socketUrlRef.current = "";
     };
   }, [bootReady, licenseReady, licensed]);
 
@@ -1312,12 +1550,24 @@ export default function App() {
     if (!config) return;
     try {
       const rawMb = Number(config?.cache?.videoMB || 0);
-      if (!Number.isFinite(rawMb) || rawMb <= 0) return;
-      const bytes = Math.max(256, rawMb) * 1024 * 1024;
       const { DeviceIdModule: NativeDeviceModule } = NativeModules as any;
-      if (NativeDeviceModule?.setVideoCacheMaxBytes) {
-        NativeDeviceModule.setVideoCacheMaxBytes(bytes);
+      if (!NativeDeviceModule?.setVideoCacheMaxBytes) return;
+      const stats = NativeDeviceModule?.getStorageStats?.() || {};
+      const freeBytes = Number(stats?.freeBytes || 0);
+      const totalBytes = Number(stats?.totalBytes || 0);
+      let adaptiveMb = Number.isFinite(rawMb) && rawMb > 0 ? rawMb : 128;
+      if (totalBytes > 0 && totalBytes <= 4.5 * 1024 * 1024 * 1024) {
+        adaptiveMb = Math.min(adaptiveMb, 128);
       }
+      if (freeBytes > 0 && freeBytes <= 1.2 * 1024 * 1024 * 1024) {
+        adaptiveMb = Math.min(adaptiveMb, 64);
+      } else if (freeBytes > 0 && freeBytes <= 2.2 * 1024 * 1024 * 1024) {
+        adaptiveMb = Math.min(adaptiveMb, 96);
+      } else {
+        adaptiveMb = Math.min(adaptiveMb, 160);
+      }
+      const bytes = Math.max(64, Math.round(adaptiveMb)) * 1024 * 1024;
+      NativeDeviceModule.setVideoCacheMaxBytes(bytes);
     } catch {
     }
   }, [config]);
@@ -1458,33 +1708,60 @@ export default function App() {
     const section = Number(payload?.section || 0);
     if (!section) return;
     setPrioritySection(section);
+    const previous = playbackBySectionRef.current[section] || null;
+    const nextPlayback = {
+      title: String(payload?.title || ""),
+      sourceType: String(payload?.sourceType || ""),
+      mediaType: String(payload?.mediaType || ""),
+      page: Number(payload?.page || 0),
+      cacheStatus: String(payload?.cacheStatus || ""),
+      itemIndex: Number(payload?.itemIndex || 0),
+      totalItems: Number(payload?.totalItems || 0),
+      itemElapsedMs: Number(payload?.itemElapsedMs || 0),
+      itemDurationMs: Number(payload?.itemDurationMs || 0),
+      playlistElapsedMs: Number(payload?.playlistElapsedMs || 0),
+      playlistTotalMs: Number(payload?.playlistTotalMs || 0),
+      updatedAt: new Date().toISOString(),
+    };
+    const changedMedia =
+      !previous ||
+      previous.title !== nextPlayback.title ||
+      previous.sourceType !== nextPlayback.sourceType ||
+      previous.mediaType !== nextPlayback.mediaType ||
+      previous.page !== nextPlayback.page ||
+      previous.itemIndex !== nextPlayback.itemIndex ||
+      previous.totalItems !== nextPlayback.totalItems;
+    const changedTiming =
+      !previous ||
+      Math.abs(Number(previous.itemElapsedMs || 0) - nextPlayback.itemElapsedMs) >= 900 ||
+      Math.abs(Number(previous.playlistElapsedMs || 0) - nextPlayback.playlistElapsedMs) >= 900 ||
+      Math.abs(Number(previous.itemDurationMs || 0) - nextPlayback.itemDurationMs) >= 900 ||
+      Math.abs(Number(previous.playlistTotalMs || 0) - nextPlayback.playlistTotalMs) >= 900 ||
+      previous.cacheStatus !== nextPlayback.cacheStatus;
     playbackStatsRef.current = {
       ...playbackStatsRef.current,
-      playbackChanges: playbackStatsRef.current.playbackChanges + 1,
-      lastTitle: String(payload?.title || ""),
+      playbackChanges: playbackStatsRef.current.playbackChanges + (changedMedia ? 1 : 0),
+      lastTitle: nextPlayback.title,
       lastSection: section,
       lastUpdatedAt: new Date().toISOString(),
     };
     playbackBySectionRef.current = {
       ...playbackBySectionRef.current,
-      [section]: {
-        title: String(payload?.title || ""),
-        sourceType: String(payload?.sourceType || ""),
-        mediaType: String(payload?.mediaType || ""),
-        page: Number(payload?.page || 0),
-        cacheStatus: String(payload?.cacheStatus || ""),
-        updatedAt: new Date().toISOString(),
-      },
+      [section]: nextPlayback,
     };
     if (socket?.connected && lastMetaRef.current) {
-      socket.emit("device-health", {
-        deviceId: deviceIdRef.current,
-        appState: "playback-change",
-        meta: {
-          ...lastMetaRef.current,
-          currentPlaybackBySection: playbackBySectionRef.current,
-        },
-      });
+      const now = Date.now();
+      if (changedMedia || changedTiming || now - lastPlaybackHealthEmitAtRef.current >= 1000) {
+        lastPlaybackHealthEmitAtRef.current = now;
+        socket.emit("device-health", {
+          deviceId: deviceIdRef.current,
+          appState: "playback-change",
+          meta: {
+            ...lastMetaRef.current,
+            currentPlaybackBySection: playbackBySectionRef.current,
+          },
+        });
+      }
     }
   };
 
@@ -1542,6 +1819,9 @@ export default function App() {
           <PlayerScreen
             config={safeConfig}
             mediaVersion={mediaVersion}
+            playlistSyncAt={playlistSyncAt}
+            contentResetVersion={contentResetVersion}
+            sectionPlaybackTimeline={sectionPlaybackTimeline}
             uploadProcessingBySection={uploadProcessingBySection}
             uploadCountsBySection={uploadCountsBySection}
             onPlaybackChange={handlePlaybackChange}
@@ -1563,6 +1843,28 @@ export default function App() {
       {offlineNotice ? (
         <View style={styles.offlineToast}>
           <Text style={styles.offlineToastText}>{offlineNotice}</Text>
+        </View>
+      ) : null}
+      {apkUpdateState.visible ? (
+        <View style={styles.apkUpdateOverlay}>
+          <View style={styles.apkUpdateCard}>
+            <Text style={styles.apkUpdateTitle}>App Update</Text>
+            <Text style={styles.apkUpdateMessage}>{apkUpdateState.message}</Text>
+            <View style={styles.apkUpdateBar}>
+              <View
+                style={[
+                  styles.apkUpdateBarFill,
+                  { width: `${Math.max(0, Math.min(100, apkUpdateState.percent))}%` },
+                ]}
+              />
+            </View>
+            <Text style={styles.apkUpdatePercent}>{`${Math.round(apkUpdateState.percent)}%`}</Text>
+            {apkUpdateState.status === "awaiting-confirmation" ? (
+              <Text style={styles.apkUpdateHint}>
+                Confirm install on TV if Android shows a package installer prompt.
+              </Text>
+            ) : null}
+          </View>
         </View>
       ) : null}
     </View>
@@ -1796,5 +2098,67 @@ const styles = StyleSheet.create({
     color: "rgba(200, 225, 240, 0.95)",
     fontSize: 12,
     textAlign: "center",
+  },
+  apkUpdateOverlay: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    top: 0,
+    bottom: 0,
+    backgroundColor: "rgba(0, 0, 0, 0.72)",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 20,
+  },
+  apkUpdateCard: {
+    width: "82%",
+    maxWidth: 560,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: "rgba(120, 190, 255, 0.28)",
+    backgroundColor: "rgba(10, 16, 24, 0.96)",
+    paddingHorizontal: 22,
+    paddingVertical: 20,
+  },
+  apkUpdateTitle: {
+    color: "#ffffff",
+    fontSize: 24,
+    fontWeight: "700",
+    textAlign: "center",
+  },
+  apkUpdateMessage: {
+    marginTop: 10,
+    color: "#d8e8f5",
+    fontSize: 15,
+    textAlign: "center",
+    lineHeight: 22,
+  },
+  apkUpdateBar: {
+    marginTop: 16,
+    height: 14,
+    borderRadius: 999,
+    backgroundColor: "rgba(255,255,255,0.08)",
+    overflow: "hidden",
+    borderWidth: 1,
+    borderColor: "rgba(120, 190, 255, 0.22)",
+  },
+  apkUpdateBarFill: {
+    height: "100%",
+    borderRadius: 999,
+    backgroundColor: "#44d38e",
+  },
+  apkUpdatePercent: {
+    marginTop: 12,
+    color: "#cffff0",
+    fontSize: 18,
+    fontWeight: "700",
+    textAlign: "center",
+  },
+  apkUpdateHint: {
+    marginTop: 12,
+    color: "rgba(210, 224, 238, 0.82)",
+    fontSize: 13,
+    textAlign: "center",
+    lineHeight: 19,
   },
 });

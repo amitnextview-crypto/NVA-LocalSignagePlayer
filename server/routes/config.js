@@ -2,6 +2,7 @@ const fs = require("fs");
 const path = require("path");
 const express = require("express");
 const multer = require("multer");
+const { getPlaybackTimeline } = require("../services/playbackTimeline");
 
 const router = express.Router();
 
@@ -74,13 +75,16 @@ function ensureDefaultConfig() {
   try {
     if (fs.existsSync(DEFAULT_CONFIG_PATH)) return;
 
-    if (fs.existsSync(ASSET_DEFAULT_CONFIG_PATH)) {
-      const raw = fs.readFileSync(ASSET_DEFAULT_CONFIG_PATH, "utf-8");
-      fs.writeFileSync(DEFAULT_CONFIG_PATH, raw);
-      return;
-    }
-
-    fs.writeFileSync(DEFAULT_CONFIG_PATH, JSON.stringify(DEFAULT_CONFIG_TEMPLATE, null, 2));
+    const fallbackRaw = fs.existsSync(ASSET_DEFAULT_CONFIG_PATH)
+      ? fs.readFileSync(ASSET_DEFAULT_CONFIG_PATH, "utf-8")
+      : JSON.stringify(DEFAULT_CONFIG_TEMPLATE, null, 2);
+    const parsed = JSON.parse(fallbackRaw);
+    const normalized = {
+      ...DEFAULT_CONFIG_TEMPLATE,
+      ...(parsed && typeof parsed === "object" ? parsed : {}),
+      layout: "fullscreen",
+    };
+    fs.writeFileSync(DEFAULT_CONFIG_PATH, JSON.stringify(normalized, null, 2));
   } catch (_e) {
     // best effort
   }
@@ -150,7 +154,10 @@ router.get("/", (req, res) => {
   }
 
   const data = fs.readFileSync(filePath, "utf-8");
-  res.json(JSON.parse(data));
+  res.json({
+    ...JSON.parse(data),
+    playbackTimeline: getPlaybackTimeline(deviceId || "all"),
+  });
 });
 
 router.post("/", (req, res) => {

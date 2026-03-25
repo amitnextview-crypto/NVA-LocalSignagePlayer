@@ -2,6 +2,8 @@ package com.signageplayertv;
 
 import android.content.Context;
 import android.net.Uri;
+import android.os.Handler;
+import android.os.Looper;
 import android.view.LayoutInflater;
 import android.view.ViewGroup;
 import android.widget.FrameLayout;
@@ -34,17 +36,43 @@ import com.google.android.exoplayer2.upstream.cache.SimpleCache;
 import java.io.File;
 
 public class NativeVideoPlayerView extends FrameLayout implements LifecycleEventListener {
+    private static final long SEEK_TOLERANCE_MS = 1200L;
+    private static final long BUFFER_STALL_RECOVERY_MS = 15000L;
+    private static final long RECOVERY_THROTTLE_MS = 5000L;
     private final ReactContext reactContext;
     private final StyledPlayerView playerView;
     private ExoPlayer player;
     private String src = "";
     private boolean muted = true;
+    private boolean paused = false;
     private boolean repeat = false;
+    private long startPositionMs = 0L;
     private String resizeMode = "stretch";
     private float rotation = 0f;
+    private String preparedSrc = "";
     private boolean attached = false;
+    private boolean startPositionApplied = false;
+    private long lastKnownPositionMs = 0L;
+    private long lastRecoveryAtMs = 0L;
+    private int recoveryCount = 0;
+    private boolean bufferingActive = false;
+    private final Runnable bufferingRecoveryRunnable = new Runnable() {
+        @Override
+        public void run() {
+            if (!attached || player == null || src.isEmpty() || !bufferingActive) return;
+            attemptRecovery("buffer-stall");
+        }
+    };
+    private final Handler progressHandler = new Handler(Looper.getMainLooper());
+    private final Runnable progressRunnable = new Runnable() {
+        @Override
+        public void run() {
+            dispatchProgress();
+            progressHandler.postDelayed(this, 1000L);
+        }
+    };
     private static SimpleCache videoCache;
-    private static final long VIDEO_CACHE_DEFAULT_BYTES = 2L * 1024 * 1024 * 1024; // 2GB
+    private static final long VIDEO_CACHE_DEFAULT_BYTES = 128L * 1024 * 1024; // 128MB
     private static long videoCacheMaxBytes = VIDEO_CACHE_DEFAULT_BYTES;
 
     public NativeVideoPlayerView(@NonNull Context context, @NonNull ReactContext reactContext) {
@@ -57,6 +85,7 @@ public class NativeVideoPlayerView extends FrameLayout implements LifecycleEvent
             ViewGroup.LayoutParams.MATCH_PARENT
         ));
         this.playerView.setKeepScreenOn(true);
+        this.playerView.setKeepContentOnPlayerReset(true);
         applyResizeMode();
         applyRotation();
         reactContext.addLifecycleEventListener(this);
@@ -69,7 +98,7 @@ public class NativeVideoPlayerView extends FrameLayout implements LifecycleEvent
                     .getLong("video_cache_max_bytes", VIDEO_CACHE_DEFAULT_BYTES);
         } catch (Exception ignored) {
         }
-        if (prefMaxBytes < 256L * 1024 * 1024) prefMaxBytes = 256L * 1024 * 1024;
+        if (prefMaxBytes < 64L * 1024 * 1024) prefMaxBytes = 64L * 1024 * 1024;
         if (videoCache != null && videoCacheMaxBytes == prefMaxBytes) return videoCache;
         if (videoCache != null) {
             try {
@@ -119,8 +148,28 @@ public class NativeVideoPlayerView extends FrameLayout implements LifecycleEvent
 
     public void setSrc(String value) {
         String next = value == null ? "" : value.trim();
-        if (next.equals(this.src)) return;
+        if (next.equals(this.src)) {
+            if (player != null && !next.isEmpty()) {
+                try {
+                    if (!startPositionApplied && startPositionMs > 0L) {
+                        long currentPosition = Math.max(0L, player.getCurrentPosition());
+                        if (Math.abs(currentPosition - startPositionMs) > SEEK_TOLERANCE_MS) {
+                            player.seekTo(Math.max(0L, startPositionMs));
+                        }
+                        startPositionApplied = true;
+                    }
+                    player.setPlayWhenReady(!paused);
+                    if (!paused) {
+                        player.play();
+                    }
+                    dispatchProgress();
+                } catch (Exception ignored) {
+                }
+            }
+            return;
+        }
         this.src = next;
+        recoveryCount = 0;
         prepareIfPossible();
     }
 
@@ -131,10 +180,50 @@ public class NativeVideoPlayerView extends FrameLayout implements LifecycleEvent
         }
     }
 
+    public void setPaused(boolean value) {
+        this.paused = value;
+        if (player != null) {
+            try {
+                player.setPlayWhenReady(!value);
+                if (!value) {
+                    player.play();
+                } else {
+                    player.pause();
+                }
+            } catch (Exception ignored) {
+            }
+        }
+    }
+
     public void setRepeat(boolean value) {
         this.repeat = value;
         if (player != null) {
             player.setRepeatMode(value ? Player.REPEAT_MODE_ONE : Player.REPEAT_MODE_OFF);
+        }
+    }
+
+    public void setStartPositionMs(double value) {
+        long safeValue = Math.max(0L, Math.round(value));
+        this.startPositionMs = safeValue;
+        if (player == null) {
+            this.startPositionApplied = safeValue <= 0L;
+            return;
+        }
+        if (safeValue <= 0L) {
+            this.startPositionApplied = true;
+            return;
+        }
+        this.startPositionApplied = false;
+        if (player != null) {
+            try {
+                long currentPosition = Math.max(0L, player.getCurrentPosition());
+                if (Math.abs(currentPosition - safeValue) > SEEK_TOLERANCE_MS) {
+                    player.seekTo(safeValue);
+                }
+                startPositionApplied = true;
+                dispatchProgress();
+            } catch (Exception ignored) {
+            }
         }
     }
 
@@ -153,10 +242,10 @@ public class NativeVideoPlayerView extends FrameLayout implements LifecycleEvent
 
         DefaultLoadControl loadControl = new DefaultLoadControl.Builder()
                 .setBufferDurationsMs(
-                        12000,
-                        60000,
-                        2000,
-                        4000
+                        20000,
+                        180000,
+                        1000,
+                        2500
                 )
                 .setTargetBufferBytes(C.LENGTH_UNSET)
                 .setPrioritizeTimeOverSizeThresholds(true)
@@ -191,17 +280,41 @@ public class NativeVideoPlayerView extends FrameLayout implements LifecycleEvent
             @Override
             public void onPlaybackStateChanged(int playbackState) {
                 if (playbackState == Player.STATE_BUFFERING) {
+                    bufferingActive = true;
+                    progressHandler.removeCallbacks(bufferingRecoveryRunnable);
+                    progressHandler.postDelayed(bufferingRecoveryRunnable, BUFFER_STALL_RECOVERY_MS);
                     WritableMap payload = Arguments.createMap();
                     payload.putBoolean("buffering", true);
                     dispatchEvent("topBuffer", payload);
                 }
                 if (playbackState == Player.STATE_READY) {
+                    bufferingActive = false;
+                    progressHandler.removeCallbacks(bufferingRecoveryRunnable);
+                    if (!startPositionApplied && startPositionMs > 0L) {
+                        try {
+                            long currentPosition = Math.max(0L, player.getCurrentPosition());
+                            long durationMs = Math.max(0L, player.getDuration());
+                            long safeSeek = startPositionMs;
+                            if (durationMs > 2000L) {
+                                safeSeek = Math.min(startPositionMs, Math.max(0L, durationMs - 1200L));
+                            }
+                            if (safeSeek > 0L && Math.abs(currentPosition - safeSeek) > SEEK_TOLERANCE_MS) {
+                                player.seekTo(safeSeek);
+                            }
+                        } catch (Exception ignored) {
+                        }
+                        startPositionApplied = true;
+                    }
                     WritableMap payload = Arguments.createMap();
                     payload.putBoolean("buffering", false);
                     dispatchEvent("topBuffer", payload);
                     dispatchEvent("topReady", null);
+                    dispatchProgress();
                 }
                 if (playbackState == Player.STATE_ENDED && !repeat) {
+                    bufferingActive = false;
+                    progressHandler.removeCallbacks(bufferingRecoveryRunnable);
+                    dispatchProgress();
                     dispatchEvent("topEnd", null);
                 }
             }
@@ -209,19 +322,78 @@ public class NativeVideoPlayerView extends FrameLayout implements LifecycleEvent
             @Override
             public void onPlayerError(@NonNull PlaybackException error) {
                 WritableMap event = Arguments.createMap();
-                event.putString("message", error.getMessage());
+                event.putString("message", buildErrorMessage(error));
                 dispatchEvent("topError", event);
+                attemptRecovery("player-error");
             }
         });
+    }
+
+    private String buildErrorMessage(@NonNull PlaybackException error) {
+        String message = String.valueOf(error.getMessage());
+        try {
+            return "code="
+                    + error.errorCode
+                    + ", name="
+                    + error.getErrorCodeName()
+                    + ", msg="
+                    + message;
+        } catch (Exception ignored) {
+            return message;
+        }
+    }
+
+    private void attemptRecovery(String reason) {
+        if (player == null || src.isEmpty()) return;
+        long now = System.currentTimeMillis();
+        if (now - lastRecoveryAtMs < RECOVERY_THROTTLE_MS) return;
+        lastRecoveryAtMs = now;
+        recoveryCount += 1;
+        long recoverPosition = Math.max(lastKnownPositionMs, Math.max(0L, player.getCurrentPosition()));
+        startPositionMs = recoverPosition;
+        startPositionApplied = false;
+        preparedSrc = "";
+        bufferingActive = false;
+        progressHandler.removeCallbacks(bufferingRecoveryRunnable);
+        try {
+            player.stop();
+        } catch (Exception ignored) {
+        }
+        WritableMap event = Arguments.createMap();
+        event.putString("message", "native-recovery:" + reason + ":count=" + recoveryCount);
+        dispatchEvent("topError", event);
+        prepareIfPossible();
     }
 
     private void prepareIfPossible() {
         if (!attached || src.isEmpty()) return;
         ensurePlayer();
+        if (player != null && src.equals(preparedSrc) && player.getCurrentMediaItem() != null) {
+            try {
+                if (!startPositionApplied && startPositionMs > 0L) {
+                    player.seekTo(Math.max(0L, startPositionMs));
+                    startPositionApplied = true;
+                }
+                player.setPlayWhenReady(!paused);
+                if (!paused) {
+                    player.play();
+                }
+                dispatchProgress();
+                return;
+            } catch (Exception ignored) {
+                // Fall through to a full prepare if the existing player state is invalid.
+            }
+        }
         MediaItem mediaItem = MediaItem.fromUri(Uri.parse(src));
-        player.setMediaItem(mediaItem);
+        startPositionApplied = false;
+        preparedSrc = src;
+        player.setMediaItem(mediaItem, Math.max(0L, startPositionMs));
         player.prepare();
-        player.play();
+        player.setPlayWhenReady(!paused);
+        if (!paused) {
+            player.play();
+        }
+        dispatchProgress();
     }
 
     private void applyResizeMode() {
@@ -246,41 +418,88 @@ public class NativeVideoPlayerView extends FrameLayout implements LifecycleEvent
         );
     }
 
+    private void dispatchProgress() {
+        if (player == null) return;
+        try {
+            lastKnownPositionMs = Math.max(0L, player.getCurrentPosition());
+            WritableMap payload = Arguments.createMap();
+            payload.putDouble("positionMs", (double) lastKnownPositionMs);
+            payload.putDouble("durationMs", (double) Math.max(0L, player.getDuration()));
+            payload.putBoolean("isPlaying", player.isPlaying());
+            dispatchEvent("topProgress", payload);
+        } catch (Exception ignored) {
+        }
+    }
+
     private void releasePlayer() {
         if (player != null) {
+            dispatchProgress();
             player.release();
             player = null;
         }
+        bufferingActive = false;
+        progressHandler.removeCallbacks(bufferingRecoveryRunnable);
+        preparedSrc = "";
     }
 
     @Override
     protected void onAttachedToWindow() {
         super.onAttachedToWindow();
         attached = true;
+        progressHandler.removeCallbacks(progressRunnable);
+        progressHandler.post(progressRunnable);
         prepareIfPossible();
     }
 
     @Override
     protected void onDetachedFromWindow() {
         attached = false;
-        releasePlayer();
+        progressHandler.removeCallbacks(progressRunnable);
+        progressHandler.removeCallbacks(bufferingRecoveryRunnable);
+        if (player != null) {
+            try {
+                dispatchProgress();
+                player.pause();
+            } catch (Exception ignored) {
+            }
+        }
         super.onDetachedFromWindow();
     }
 
     @Override
     public void onHostResume() {
+        if (player != null && player.getCurrentMediaItem() != null && src.equals(preparedSrc)) {
+            try {
+                player.setPlayWhenReady(!paused);
+                if (!paused) {
+                    player.play();
+                }
+                dispatchProgress();
+                return;
+            } catch (Exception ignored) {
+                // Fall back to prepareIfPossible below.
+            }
+        }
         prepareIfPossible();
     }
 
     @Override
     public void onHostPause() {
         if (player != null) {
+            progressHandler.removeCallbacks(bufferingRecoveryRunnable);
+            dispatchProgress();
             player.pause();
         }
     }
 
     @Override
     public void onHostDestroy() {
+        progressHandler.removeCallbacks(progressRunnable);
+        releasePlayer();
+    }
+
+    public void destroyView() {
+        progressHandler.removeCallbacks(progressRunnable);
         releasePlayer();
     }
 }

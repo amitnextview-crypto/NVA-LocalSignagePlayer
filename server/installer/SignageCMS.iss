@@ -1,7 +1,15 @@
+#ifndef AppVersion
+#define AppVersion "1.0.0"
+#endif
+
+#ifndef OutputBaseName
+#define OutputBaseName "NVA-SignagePlayerTV-Setup"
+#endif
+
 [Setup]
 AppId={{8E6F9941-2FE4-49A6-8A99-ED6E0101D0AB}
 AppName=Signage CMS
-AppVersion=1.0.0
+AppVersion={#AppVersion}
 AppPublisher=SignagePlayerTV
 AppPublisherURL=https://signageplayertv.local
 AppSupportURL=https://signageplayertv.local
@@ -9,7 +17,7 @@ AppUpdatesURL=https://signageplayertv.local
 DefaultDirName={localappdata}\NVA SignagePlayerTV
 DefaultGroupName=NVA SignagePlayerTV
 OutputDir=output
-OutputBaseFilename=NVA-SignagePlayerTV-Setup
+OutputBaseFilename={#OutputBaseName}
 Compression=lzma
 SolidCompression=yes
 WizardStyle=modern

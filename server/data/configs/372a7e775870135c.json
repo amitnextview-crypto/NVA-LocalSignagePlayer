@@ -1,27 +1,27 @@
 {
   "orientation": "horizontal",
-  "layout": "grid3",
-  "grid3Layout": "top-two-bottom-one",
+  "layout": "fullscreen",
+  "grid3Layout": "stack-h",
   "gridRatio": "1:1",
-  "slideDuration": 7,
+  "slideDuration": 4,
   "animation": "slide",
   "bgColor": "#000000",
   "sections": [
     {
-      "slideDirection": "top",
-      "slideDuration": 7,
+      "slideDirection": "left",
+      "slideDuration": 4,
       "sourceType": "multimedia",
       "sourceUrl": ""
     },
     {
-      "slideDirection": "top",
+      "slideDirection": "left",
       "slideDuration": 5,
       "sourceType": "multimedia",
       "sourceUrl": ""
     },
     {
-      "slideDirection": "bottom",
-      "slideDuration": 3,
+      "slideDirection": "right",
+      "slideDuration": 6,
       "sourceType": "multimedia",
       "sourceUrl": ""
     }
@@ -29,9 +29,9 @@
   "ticker": {
     "text": "Breaking News: NextView Premium Product New Update Available!",
     "color": "#f9f1f1",
-    "bgColor": "#cece0d",
-    "speed": 7,
-    "fontSize": 34,
+    "bgColor": "#014b1e",
+    "speed": 12,
+    "fontSize": 21,
     "position": "bottom"
   },
   "cache": {

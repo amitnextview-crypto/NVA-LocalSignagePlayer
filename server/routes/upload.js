@@ -3,6 +3,7 @@ const multer = require("multer");
 const fs = require("fs");
 const path = require("path");
 const { execFile } = require("child_process");
+const { clearDeviceTimeline, updateSectionTimeline } = require("../services/playbackTimeline");
 const { encodeVideo } = require("../services/videoEncoder");
 const { safeStat, safeReaddir, safeExistsDir, safeExists, wait } = require("../utils/fsSafe");
 
@@ -502,6 +503,12 @@ async function activateIncomingSection(deviceId, section, incomingDir) {
 
   cleanupOldSectionVersions(versionsDir, versionName, previousState?.activeVersion ? 2 : 1).catch(() => {
   });
+
+  return {
+    versionName,
+    activeFiles,
+    updatedAt: Date.now(),
+  };
 }
 
 async function optimizeVideosInDirectory(dirPath) {
@@ -695,7 +702,7 @@ router.post("/:deviceId/section/:section", (req, res) => {
           }
         }
 
-        await activateIncomingSection(deviceId, section, tempSectionPath);
+        const activation = await activateIncomingSection(deviceId, section, tempSectionPath);
 
         // Apply "all" upload to all devices only after successful activation.
         // Remove per-device section overrides so they follow "all" immediately.
@@ -703,6 +710,7 @@ router.post("/:deviceId/section/:section", (req, res) => {
           const folders = safeReaddir(uploadsBase);
           for (const folder of folders) {
             if (folder === "all") continue;
+            clearDeviceTimeline(folder);
             const { sectionBase, versionsDir, activeFile } = sectionPaths(folder, section);
             try {
               if (safeExists(sectionBase)) {
@@ -725,11 +733,22 @@ router.post("/:deviceId/section/:section", (req, res) => {
         );
 
         if (global.io) {
+          const syncAt = Date.now() + 3000;
+          const timeline = updateSectionTimeline(deviceId, section, {
+            targetDevice: deviceId,
+            syncAt,
+            updatedAt: activation?.updatedAt || Date.now(),
+            cycleId: `${section}-${String(activation?.versionName || Date.now())}`,
+            fileCount: Array.isArray(activation?.activeFiles) ? activation.activeFiles.length : 0,
+            mediaSignature: Array.isArray(activation?.activeFiles)
+              ? activation.activeFiles.join("|")
+              : "",
+          });
           if (deviceId === "all") {
-            global.io.emit("media-updated");
+            global.io.emit("media-updated", { syncAt, section, timeline });
           } else if (global.connectedDevices?.[deviceId]) {
             const socketId = global.connectedDevices[deviceId];
-            global.io.to(socketId).emit("media-updated");
+            global.io.to(socketId).emit("media-updated", { syncAt, section, timeline });
           }
         }
 

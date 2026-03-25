@@ -299,6 +299,7 @@ function upsertDeviceStatus(deviceId, patch = {}) {
     lastDisconnectAt: null,
     appState: null,
     meta: null,
+    recentEvents: [],
   };
 
   deviceStatus[deviceId] = {
@@ -307,6 +308,20 @@ function upsertDeviceStatus(deviceId, patch = {}) {
     deviceId,
     lastSeen: nowIso(),
   };
+}
+
+function appendDeviceEvent(deviceId, type, message) {
+  if (!deviceId) return;
+  const prev = deviceStatus[deviceId] || { recentEvents: [] };
+  const nextEvents = [
+    ...(Array.isArray(prev.recentEvents) ? prev.recentEvents : []),
+    {
+      time: nowIso(),
+      type: String(type || "runtime"),
+      message: String(message || "").slice(0, 240),
+    },
+  ].slice(-20);
+  upsertDeviceStatus(deviceId, { recentEvents: nextEvents });
 }
 
 io.on("connection", (socket) => {
@@ -321,6 +336,7 @@ io.on("connection", (socket) => {
       lastErrorAt: null,
       errorType: null,
     });
+    appendDeviceEvent(deviceId, "socket", "Device connected");
     console.log("Device connected:", deviceId);
   });
 
@@ -337,6 +353,9 @@ io.on("connection", (socket) => {
       lastErrorAt: null,
       errorType: null,
     });
+    if (payload?.appState) {
+      appendDeviceEvent(deviceId, "health", `State: ${String(payload.appState)}`);
+    }
   });
 
   socket.on("device-error", (payload) => {
@@ -350,6 +369,11 @@ io.on("connection", (socket) => {
       lastErrorAt: nowIso(),
       errorType: payload?.type || "runtime",
     });
+    appendDeviceEvent(
+      deviceId,
+      payload?.type || "runtime",
+      payload?.message || payload?.error || "Unknown device error"
+    );
   });
 
   socket.on("disconnect", (reason) => {
@@ -361,6 +385,7 @@ io.on("connection", (socket) => {
           lastDisconnectReason: String(reason || "disconnect"),
           lastDisconnectAt: nowIso(),
         });
+        appendDeviceEvent(id, "socket", `Disconnected: ${String(reason || "disconnect")}`);
         console.log("Device disconnected:", id);
       }
     }
@@ -386,7 +411,7 @@ app.get("/device-status", (req, res) => {
       online: !!connectedDevices[item.deviceId],
     }))
     .sort((a, b) => {
-      if (a.online !== b.online) return a.online ? 1 : -1;
+      if (a.online !== b.online) return a.online ? -1 : 1;
       const aTs = Date.parse(a.lastErrorAt || a.lastSeen || 0);
       const bTs = Date.parse(b.lastErrorAt || b.lastSeen || 0);
       return bTs - aTs;

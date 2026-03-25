@@ -12,8 +12,8 @@
   },
   "scripts": {
     "start": "node index.js",
-    "build": "pkg . --targets node18-win-x64 --output NVA-SignagePlayerTV",
-    "build:exe": "pkg . --targets node18-win-x64 --output NVA-SignagePlayerTV",
+    "build": "node .\\scripts\\build-version.js build-exe",
+    "build:exe": "node .\\scripts\\build-version.js build-exe",
     "build:installer": "powershell -ExecutionPolicy Bypass -File .\\installer\\build-installer.ps1"
   },
   "dependencies": {

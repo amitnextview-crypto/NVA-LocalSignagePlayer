@@ -25,9 +25,11 @@ class MainActivity : ReactActivity() {
     private const val REOPEN_REQ_CODE = 7201
     private const val PREFS_NAME = "kiosk_prefs"
     private const val KEY_AUTO_REOPEN_ENABLED = "auto_reopen_enabled"
+    private const val EXTRA_SKIP_AUTO_REOPEN_RESTORE_ONCE = "skip_auto_reopen_restore_once"
   }
 
   private val reopenHandler = Handler(Looper.getMainLooper())
+  private var skipAutoReopenRestoreThisLaunch = false
   private val reopenRunnable = Runnable {
     if (!isAutoReopenEnabled()) return@Runnable
     try {
@@ -48,11 +50,9 @@ class MainActivity : ReactActivity() {
 
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
-    // Force-enable auto reopen for kiosk behavior.
-    try {
-      setAutoReopenEnabled(true)
-    } catch (_: Exception) {
-    }
+    skipAutoReopenRestoreThisLaunch =
+      intent?.getBooleanExtra(EXTRA_SKIP_AUTO_REOPEN_RESTORE_ONCE, false) == true
+    restoreAutoReopenOnLaunchIfNeeded()
     window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
     val keepAliveIntent = Intent(this, KioskKeepAliveService::class.java)
     ContextCompat.startForegroundService(this, keepAliveIntent)
@@ -61,13 +61,9 @@ class MainActivity : ReactActivity() {
 
   override fun onResume() {
     super.onResume()
+    restoreAutoReopenOnLaunchIfNeeded()
     cancelScheduledReopen()
     hideSystemUI()
-    try {
-      startLockTask()
-    } catch (_: Exception) {
-      // Device may not allow lock task if not pinned/whitelisted; fallback is reopen timer.
-    }
   }
 
   override fun onPause() {
@@ -198,6 +194,16 @@ override fun onWindowFocusChanged(hasFocus: Boolean) {
 
   private fun getPrefs() = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
+  private fun restoreAutoReopenOnLaunchIfNeeded() {
+    try {
+      if (skipAutoReopenRestoreThisLaunch) {
+        return
+      }
+      setAutoReopenEnabled(true)
+    } catch (_: Exception) {
+    }
+  }
+
   private fun isAutoReopenEnabled(): Boolean {
     return getPrefs().getBoolean(KEY_AUTO_REOPEN_ENABLED, true)
   }
@@ -208,6 +214,11 @@ override fun onWindowFocusChanged(hasFocus: Boolean) {
 
   private fun clearSignageDataAndRestart() {
     try {
+      getPrefs().edit()
+        .putBoolean(KEY_AUTO_REOPEN_ENABLED, false)
+        .apply()
+      cancelScheduledReopen()
+
       // Remove app-level signage files without full "clear data" settings flow.
       val filesRoot = filesDir
       File(filesRoot, "media").deleteRecursively()
@@ -220,6 +231,7 @@ override fun onWindowFocusChanged(hasFocus: Boolean) {
     Toast.makeText(this, "Data cleared, restarting...", Toast.LENGTH_SHORT).show()
     val launchIntent = packageManager.getLaunchIntentForPackage(packageName)
     launchIntent?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+    launchIntent?.putExtra(EXTRA_SKIP_AUTO_REOPEN_RESTORE_ONCE, true)
     if (launchIntent != null) {
       startActivity(launchIntent)
       finishAffinity()

@@ -46,22 +46,11 @@ class KioskKeepAliveService : Service() {
 
   override fun onCreate() {
     super.onCreate()
-    // Force-enable auto reopen for kiosk behavior.
-    try {
-      val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-      prefs.edit().putBoolean(KEY_AUTO_REOPEN_ENABLED, true).apply()
-    } catch (_: Exception) {
-    }
     startInForeground()
     startWatchdog()
   }
 
   override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-    try {
-      val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-      prefs.edit().putBoolean(KEY_AUTO_REOPEN_ENABLED, true).apply()
-    } catch (_: Exception) {
-    }
     startInForeground()
     startWatchdog()
     return START_STICKY

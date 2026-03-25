@@ -21,6 +21,13 @@ const DOWNLOAD_RETRY_DELAY_MS = 1200;
 const DEFAULT_MIN_FREE_BYTES = 500 * 1024 * 1024;
 const VIDEO_FILE_RE = /\.(mp4|m4v|mov|mkv|webm)(\?.*)?$/i;
 const VIDEO_DOWNLOAD_CONCURRENCY = 1;
+const CACHE_SUMMARY_TTL_MS = 3000;
+const LOW_STORAGE_HARD_LIMIT_BYTES = 1200 * 1024 * 1024;
+const LOW_STORAGE_SOFT_LIMIT_BYTES = 2200 * 1024 * 1024;
+const LOW_STORAGE_SMALL_FILE_BYTES = 10 * 1024 * 1024;
+const LOW_STORAGE_MEDIUM_FILE_BYTES = 24 * 1024 * 1024;
+const LOW_STORAGE_VIDEO_FILE_BYTES = 40 * 1024 * 1024;
+const LOW_STORAGE_ROOM_TOTAL_BYTES = 5 * 1024 * 1024 * 1024;
 
 function getAdaptiveDownloadConcurrency(): number {
   try {
@@ -77,6 +84,27 @@ function emitProgress(path: string, progress: CacheProgress) {
     }
   }
 }
+
+function invalidateCacheSummary() {
+  cacheSummaryCache.at = 0;
+}
+
+function clearProgressForMissingPaths(activeUrls: Set<string>) {
+  for (const key of Object.keys(progressMap)) {
+    if (!activeUrls.has(key)) {
+      delete progressMap[key];
+    }
+  }
+}
+
+function markCachedProgress(path: string, totalBytes = 0) {
+  emitProgress(path, {
+    total: Math.max(0, Number(totalBytes || 0)),
+    received: Math.max(0, Number(totalBytes || 0)),
+    percent: 100,
+    updatedAt: Date.now(),
+  });
+}
 // Short grace period avoids deleting files that might still be in active playback pipeline.
 const CACHE_RETENTION_MS = 2 * 60 * 1000;
 
@@ -118,6 +146,7 @@ let listBackoffUntilMs = 0;
 let lastBackoffLogAtMs = 0;
 const lastMediaLogAtBySection: Record<number, number> = {};
 const lastMediaLogKeyBySection: Record<number, string> = {};
+let cacheSummaryCache = { at: 0, total: 0, cached: 0, percent: 0 };
 
 function getListBackoffDelayMs(): number {
   const exp = Math.min(listBackoffFailCount, 6);
@@ -134,6 +163,29 @@ export function setPrioritySection(section: number) {
 export function setNonPriorityThrottleMs(ms: number) {
   const value = Number(ms || 0);
   nonPriorityThrottleMs = Number.isFinite(value) ? Math.max(0, Math.floor(value)) : 0;
+}
+
+export async function resetMediaRuntimeState(options: { clearListCache?: boolean } = {}) {
+  memoryListCache = [];
+  memoryListCacheAtMs = 0;
+  inFlightListRefresh = null;
+  lastListEtag = "";
+  listBackoffFailCount = 0;
+  listBackoffUntilMs = 0;
+  lastBackoffLogAtMs = 0;
+  cacheSummaryCache = { at: 0, total: 0, cached: 0, percent: 0 };
+  for (const key of Object.keys(progressMap)) {
+    delete progressMap[key];
+  }
+  if (options.clearListCache) {
+    try {
+      if (await RNFS.exists(LIST_CACHE_PATH)) {
+        await RNFS.unlink(LIST_CACHE_PATH);
+      }
+    } catch {
+      // ignore cleanup errors
+    }
+  }
 }
 
 function mediaItemFingerprint(item: MediaItem): string {
@@ -218,6 +270,7 @@ async function readManifest(): Promise<ManifestMap> {
 
 async function writeManifest(manifest: ManifestMap) {
   await writeJsonFile(MANIFEST_PATH, manifest);
+  invalidateCacheSummary();
 }
 
 async function readListCache(): Promise<MediaItem[]> {
@@ -233,6 +286,7 @@ async function writeListCache(list: MediaItem[]) {
   await writeJsonFile(LIST_CACHE_PATH, list);
   memoryListCache = list;
   memoryListCacheAtMs = Date.now();
+  invalidateCacheSummary();
 }
 
 async function fileExists(path: string): Promise<boolean> {
@@ -264,9 +318,35 @@ function localPathFor(remoteUrl: string, section: number, name: string): string 
 }
 
 function shouldCacheItem(item: MediaItem): boolean {
-  // Offline playback requires every uploaded asset to be available locally.
-  // Keep caching unconditional so the last synced content still plays when CMS is offline.
-  return !!String(item?.url || "").trim();
+  const url = String(item?.url || "").trim();
+  if (!url) return false;
+  const sizeBytes = Number(item?.size || 0);
+  const isVideo = isVideoItem(item);
+  try {
+    const stats = DeviceIdModule?.getStorageStats?.();
+    const freeBytes = Number(stats?.freeBytes || 0);
+    const totalBytes = Number(stats?.totalBytes || 0);
+    const lowCapacityDevice =
+      totalBytes > 0 && totalBytes <= LOW_STORAGE_ROOM_TOTAL_BYTES;
+    if (freeBytes > 0 && freeBytes <= LOW_STORAGE_HARD_LIMIT_BYTES) {
+      if (isVideo) {
+        return sizeBytes > 0 && sizeBytes <= LOW_STORAGE_VIDEO_FILE_BYTES;
+      }
+      return sizeBytes <= 0 || sizeBytes <= LOW_STORAGE_SMALL_FILE_BYTES;
+    }
+    if (
+      (freeBytes > 0 && freeBytes <= LOW_STORAGE_SOFT_LIMIT_BYTES) ||
+      lowCapacityDevice
+    ) {
+      if (isVideo) {
+        return sizeBytes > 0 && sizeBytes <= LOW_STORAGE_VIDEO_FILE_BYTES;
+      }
+      return sizeBytes <= 0 || sizeBytes <= LOW_STORAGE_MEDIUM_FILE_BYTES;
+    }
+  } catch {
+    // ignore adaptive storage checks
+  }
+  return true;
 }
 
 function isVideoItem(item: MediaItem): boolean {
@@ -359,6 +439,7 @@ async function downloadIfNeeded(
   const entry = manifest[remotePath];
 
   if (await isManifestEntryUsable(entry, expectedSize, expectedMtime, expectedHash)) {
+    markCachedProgress(remotePath, Number(entry?.size || expectedSize || 0));
     return entry!.localPath;
   }
 
@@ -395,6 +476,7 @@ async function downloadIfNeeded(
           percent: 100,
           updatedAt: Date.now(),
         });
+        invalidateCacheSummary();
         return targetPath;
       }
     }
@@ -454,10 +536,11 @@ async function downloadIfNeeded(
         percent: 100,
         updatedAt: Date.now(),
       });
+      invalidateCacheSummary();
       return targetPath;
     } catch {
       if (attempt < DOWNLOAD_MAX_RETRIES - 1) {
-        await new Promise((resolve) => setTimeout(resolve, DOWNLOAD_RETRY_DELAY_MS));
+        await new Promise<void>((resolve) => setTimeout(() => resolve(), DOWNLOAD_RETRY_DELAY_MS));
       }
     }
   }
@@ -541,6 +624,7 @@ async function applyManifestToCachedList(list: MediaItem[]): Promise<MediaItem[]
         const entry = manifest[path];
         if (!entry || !(await fileExists(entry.localPath))) return item;
         const fileUri = localUri(entry.localPath);
+        markCachedProgress(path, Number(entry.size || item?.size || 0));
         if (item.remoteUrl !== fileUri || item.localPath !== entry.localPath) {
           changed = true;
           return { ...item, localPath: entry.localPath, remoteUrl: fileUri };
@@ -583,7 +667,7 @@ async function runTasksWithConcurrency(
         // no-op
       }
       if (options.delayMs && options.delayMs > 0) {
-        await new Promise((resolve) => setTimeout(resolve, options.delayMs));
+        await new Promise<void>((resolve) => setTimeout(() => resolve(), options.delayMs));
       }
     }
   }
@@ -624,6 +708,7 @@ async function mapServerListToPlayable(
       const expectedHash = String(item.hash || "").trim();
       if (await isManifestEntryUsable(existing, expectedSize, expectedMtime, expectedHash)) {
         resolvedByUrl[path] = existing.localPath;
+        markCachedProgress(path, Number(existing.size || item.size || 0));
         continue;
       }
     }
@@ -673,6 +758,7 @@ async function mapServerListToPlayable(
   });
 
   await removeStaleFiles(manifest, activeUrls, { immediate: !!options.pruneStaleNow });
+  clearProgressForMissingPaths(activeUrls);
   await writeManifest(manifest);
   if (!sameMediaList(memoryListCache, mapped)) {
     await writeListCache(mapped);
@@ -696,6 +782,7 @@ async function mapServerListToPlayable(
       const path = String(item?.url || "");
       const localPathValue = manifest[path]?.localPath;
       if (localPathValue) {
+        markCachedProgress(path, Number(item?.size || 0));
         return {
           ...item,
           localPath: localPathValue,
@@ -1061,8 +1148,17 @@ export async function prefetchMediaItems(items: MediaItem[]) {
 
 export async function getCacheSummary() {
   try {
+    const now = Date.now();
+    if (now - cacheSummaryCache.at < CACHE_SUMMARY_TTL_MS) {
+      return {
+        total: cacheSummaryCache.total,
+        cached: cacheSummaryCache.cached,
+        percent: cacheSummaryCache.percent,
+      };
+    }
     const list = await readListCache();
     if (!Array.isArray(list) || !list.length) {
+      cacheSummaryCache = { at: now, total: 0, cached: 0, percent: 0 };
       return { total: 0, cached: 0, percent: 0 };
     }
     const manifest = await readManifest();
@@ -1076,6 +1172,7 @@ export async function getCacheSummary() {
     }
     const total = list.length;
     const percent = total ? Math.round((cached / total) * 100) : 0;
+    cacheSummaryCache = { at: now, total, cached, percent };
     return { total, cached, percent };
   } catch {
     return { total: 0, cached: 0, percent: 0 };

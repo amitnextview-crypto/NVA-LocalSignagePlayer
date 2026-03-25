@@ -26,6 +26,12 @@ public class NativeVideoPlayerManager extends SimpleViewManager<NativeVideoPlaye
         return new NativeVideoPlayerView(reactContext, reactContext);
     }
 
+    @Override
+    public void onDropViewInstance(@NonNull NativeVideoPlayerView view) {
+        super.onDropViewInstance(view);
+        view.destroyView();
+    }
+
     @ReactProp(name = "src")
     public void setSrc(NativeVideoPlayerView view, @Nullable String src) {
         view.setSrc(src);
@@ -36,9 +42,19 @@ public class NativeVideoPlayerManager extends SimpleViewManager<NativeVideoPlaye
         view.setMuted(muted);
     }
 
+    @ReactProp(name = "paused", defaultBoolean = false)
+    public void setPaused(NativeVideoPlayerView view, boolean paused) {
+        view.setPaused(paused);
+    }
+
     @ReactProp(name = "repeat", defaultBoolean = false)
     public void setRepeat(NativeVideoPlayerView view, boolean repeat) {
         view.setRepeat(repeat);
+    }
+
+    @ReactProp(name = "startPositionMs", defaultDouble = 0d)
+    public void setStartPositionMs(NativeVideoPlayerView view, double startPositionMs) {
+        view.setStartPositionMs(startPositionMs);
     }
 
     @ReactProp(name = "resizeMode")
@@ -59,6 +75,7 @@ public class NativeVideoPlayerManager extends SimpleViewManager<NativeVideoPlaye
         events.put("topError", MapBuilder.of("registrationName", "onError"));
         events.put("topReady", MapBuilder.of("registrationName", "onReady"));
         events.put("topBuffer", MapBuilder.of("registrationName", "onBuffering"));
+        events.put("topProgress", MapBuilder.of("registrationName", "onProgress"));
         return events;
     }
 }

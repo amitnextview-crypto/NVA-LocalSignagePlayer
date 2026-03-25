@@ -29,6 +29,7 @@ import com.facebook.react.bridge.ReactContextBaseJavaModule;
 import com.facebook.react.bridge.WritableMap;
 import com.facebook.react.bridge.Arguments;
 import com.facebook.react.bridge.ReactMethod;
+import com.facebook.react.modules.core.DeviceEventManagerModule;
 
 public class DeviceIdModule extends ReactContextBaseJavaModule {
     private static final String PREFS_NAME = "kiosk_prefs";
@@ -93,10 +94,11 @@ public class DeviceIdModule extends ReactContextBaseJavaModule {
     @ReactMethod
     public void setAutoReopenEnabled(boolean enabled) {
         Context context = reactContext.getApplicationContext();
-        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        android.content.SharedPreferences.Editor editor = context
+                .getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
                 .edit()
-                .putBoolean(KEY_AUTO_REOPEN_ENABLED, enabled)
-                .commit();
+                .putBoolean(KEY_AUTO_REOPEN_ENABLED, enabled);
+        editor.commit();
 
         if (!enabled) {
             cancelReopenAlarm(context, MAIN_REOPEN_REQ_CODE);
@@ -119,7 +121,7 @@ public class DeviceIdModule extends ReactContextBaseJavaModule {
     @ReactMethod
     public void setVideoCacheMaxBytes(double bytes) {
         long value = (long) bytes;
-        if (value < 256L * 1024 * 1024) value = 256L * 1024 * 1024;
+        if (value < 64L * 1024 * 1024) value = 64L * 1024 * 1024;
         Context context = reactContext.getApplicationContext();
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
                 .edit()
@@ -172,6 +174,7 @@ public class DeviceIdModule extends ReactContextBaseJavaModule {
             if (safeUrl.isEmpty()) return;
             String fileName = "NVA-SignagePlayerTV-update.apk";
             File apkFile = new File(appContext.getCacheDir(), fileName);
+            sendApkUpdateEvent("downloading", "Downloading APK update...", 0, 0, 0, "");
 
             new Thread(() -> {
                 HttpURLConnection connection = null;
@@ -186,17 +189,35 @@ public class DeviceIdModule extends ReactContextBaseJavaModule {
                     connection.connect();
                     int status = connection.getResponseCode();
                     if (status < 200 || status >= 300) {
+                        sendApkUpdateEvent("error", "APK download failed", 0, 0, 0, "http-" + status);
                         return;
                     }
+                    int contentLength = connection.getContentLength();
 
                     inputStream = new BufferedInputStream(connection.getInputStream());
                     outputStream = new FileOutputStream(apkFile, false);
                     byte[] buffer = new byte[64 * 1024];
                     int read;
+                    long written = 0L;
                     while ((read = inputStream.read(buffer)) != -1) {
                         outputStream.write(buffer, 0, read);
+                        written += read;
+                        int percent = contentLength > 0
+                                ? Math.max(0, Math.min(100, (int) Math.round((written * 100d) / contentLength)))
+                                : 0;
+                        sendApkUpdateEvent(
+                                "downloading",
+                                "Downloading APK update...",
+                                percent,
+                                written,
+                                contentLength,
+                                ""
+                        );
                     }
                     outputStream.flush();
+                    sendApkUpdateEvent("downloaded", "APK downloaded. Launching installer...", 100, written, contentLength, "");
+                    final long finalWritten = written;
+                    final int finalContentLength = contentLength;
 
                     reactContext.runOnUiQueueThread(() -> {
                         try {
@@ -215,10 +236,20 @@ public class DeviceIdModule extends ReactContextBaseJavaModule {
                                             | Intent.FLAG_GRANT_READ_URI_PERMISSION
                             );
                             appContext.startActivity(installIntent);
+                            sendApkUpdateEvent(
+                                    "awaiting-confirmation",
+                                    "Installer opened. Confirm update on TV if prompted.",
+                                    100,
+                                    finalWritten,
+                                    finalContentLength,
+                                    ""
+                            );
                         } catch (Exception ignored) {
+                            sendApkUpdateEvent("error", "Unable to open installer", 100, finalWritten, finalContentLength, "launch-failed");
                         }
                     });
                 } catch (Exception ignored) {
+                    sendApkUpdateEvent("error", "APK update failed", 0, 0, 0, String.valueOf(ignored.getMessage()));
                 } finally {
                     try {
                         if (inputStream != null) inputStream.close();
@@ -234,6 +265,29 @@ public class DeviceIdModule extends ReactContextBaseJavaModule {
                     }
                 }
             }).start();
+        } catch (Exception ignored) {
+        }
+    }
+
+    private void sendApkUpdateEvent(
+            String status,
+            String message,
+            int percent,
+            long receivedBytes,
+            long totalBytes,
+            String detail
+    ) {
+        try {
+            WritableMap payload = Arguments.createMap();
+            payload.putString("status", String.valueOf(status));
+            payload.putString("message", String.valueOf(message));
+            payload.putInt("percent", Math.max(0, Math.min(100, percent)));
+            payload.putDouble("receivedBytes", (double) Math.max(0L, receivedBytes));
+            payload.putDouble("totalBytes", (double) Math.max(0L, totalBytes));
+            payload.putString("detail", detail == null ? "" : detail);
+            reactContext
+                    .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter.class)
+                    .emit("apkUpdateProgress", payload);
         } catch (Exception ignored) {
         }
     }

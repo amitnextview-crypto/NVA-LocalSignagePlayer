@@ -70,8 +70,6 @@ export default function Ticker({ ticker }: any) {
       <Animated.Text
         numberOfLines={1}
         ellipsizeMode="clip"
-        shouldRasterizeIOS
-        renderToHardwareTextureAndroid
         style={{
           transform: [{ translateX }],
           color: ticker.color || "#fff",

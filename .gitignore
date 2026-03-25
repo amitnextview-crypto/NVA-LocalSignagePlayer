@@ -95,6 +95,7 @@ server/installer/output/
 
 # Runtime uploads
 server/uploads/
+server/installer/build-meta.json
 
 # Android build folders
 android/app/build/
@@ -105,3 +106,5 @@ android/build/
 server/data/configs/
 server/uploads/
 server/data/device-groups.json
+.gradle-local/
+.gradle-local/

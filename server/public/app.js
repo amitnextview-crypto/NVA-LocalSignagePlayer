@@ -1009,8 +1009,26 @@ function getLivePlaybackForSection(sectionNumber, status) {
   return status.meta.currentPlaybackBySection[sectionNumber] || null;
 }
 
+function formatDurationMs(value) {
+  const totalMs = Math.max(0, Number(value || 0));
+  if (!totalMs) return "00:00";
+  const totalSeconds = Math.floor(totalMs / 1000);
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  if (hours > 0) {
+    return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+  }
+  return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+}
+
 function findLiveFile(files, liveSection) {
   if (!liveSection || !Array.isArray(files)) return null;
+  const itemIndex = Number(liveSection.itemIndex || 0);
+  if (itemIndex > 0) {
+    const safeIndex = Math.max(0, Math.min(files.length - 1, itemIndex - 1));
+    return files[safeIndex] || null;
+  }
   const title = String(liveSection.title || "").trim();
   if (!title) return null;
   return (
@@ -1106,6 +1124,48 @@ function applyPreviewLiveOverlay(slot, status, sectionNumber, cacheStatusOverrid
     }
   }
 
+  if (liveSection) {
+    const info = document.createElement("div");
+    info.style.position = "absolute";
+    info.style.left = "8px";
+    info.style.right = "8px";
+    info.style.bottom = "8px";
+    info.style.padding = "7px 9px";
+    info.style.borderRadius = "10px";
+    info.style.background = "rgba(6, 10, 16, 0.76)";
+    info.style.border = "1px solid rgba(120, 180, 220, 0.24)";
+    info.style.color = "#dff4ff";
+    info.style.fontSize = "10px";
+    info.style.lineHeight = "1.45";
+    info.style.whiteSpace = "pre-line";
+    info.style.pointerEvents = "none";
+
+    const lines = [];
+    const itemIndex = Number(liveSection.itemIndex || 0);
+    const totalItems = Number(liveSection.totalItems || 0);
+    if (itemIndex > 0 && totalItems > 0) {
+      lines.push(`Running file: ${itemIndex}/${totalItems}`);
+    }
+    if (Number(liveSection.itemDurationMs || 0) > 0) {
+      lines.push(
+        `Current run: ${formatDurationMs(liveSection.itemElapsedMs)} / ${formatDurationMs(
+          liveSection.itemDurationMs
+        )}`
+      );
+    }
+    if (Number(liveSection.playlistTotalMs || 0) > 0) {
+      lines.push(
+        `Section total: ${formatDurationMs(liveSection.playlistElapsedMs)} / ${formatDurationMs(
+          liveSection.playlistTotalMs
+        )}`
+      );
+    }
+    if (lines.length) {
+      info.textContent = lines.join("\n");
+      slot.appendChild(info);
+    }
+  }
+
   // Live detail panel removed as requested.
 }
 
@@ -1125,7 +1185,7 @@ function renderSectionSlot(slot, sectionNumber, config) {
     : selectedStatus.online
     ? ""
     : "Offline";
-  const liveMode = !!selectedStatus?.online && !!liveSection;
+  const liveMode = !!selectedStatus && !!liveSection;
 
   if (state.timer) {
     clearTimeout(state.timer);
@@ -1569,7 +1629,31 @@ function renderHealthSummary(statusList) {
           lines.push(
             `Section ${sectionKey}: ${section.title || "-"}${pageText} [${section.sourceType || "-"}${section.mediaType ? `/${section.mediaType}` : ""}]`
           );
+          if (Number(section.itemDurationMs || 0) > 0) {
+            lines.push(
+              `Section ${sectionKey} Run: ${formatDurationMs(section.itemElapsedMs)} / ${formatDurationMs(section.itemDurationMs)}`
+            );
+          }
+          if (Number(section.playlistTotalMs || 0) > 0) {
+            lines.push(
+              `Section ${sectionKey} Total: ${formatDurationMs(section.playlistElapsedMs)} / ${formatDurationMs(section.playlistTotalMs)}`
+            );
+          }
         });
+      const diagnostics = Array.isArray(item.meta?.recentDiagnostics)
+        ? item.meta.recentDiagnostics.slice(-5)
+        : [];
+      diagnostics.forEach((entry) => {
+        lines.push(
+          `Diag: ${formatStatusTime(entry?.time)} [${String(entry?.type || "-")}] ${String(entry?.message || "-")}`
+        );
+      });
+      const recentEvents = Array.isArray(item.recentEvents) ? item.recentEvents.slice(-5) : [];
+      recentEvents.forEach((entry) => {
+        lines.push(
+          `Event: ${formatStatusTime(entry?.time)} [${String(entry?.type || "-")}] ${String(entry?.message || "-")}`
+        );
+      });
       if (item.lastDisconnectAt) {
         lines.push(`Disconnected: ${formatStatusTime(item.lastDisconnectAt)} (${item.lastDisconnectReason || "unknown"})`);
       }
@@ -1634,6 +1718,23 @@ function renderDeviceDashboardList(statusList) {
       if (firstPlaybackKey) {
         const playing = playback[firstPlaybackKey] || {};
         summaryLines.push(`Playing: S${firstPlaybackKey} ${playing.title || "-"}`);
+        if (Number(playing.itemDurationMs || 0) > 0) {
+          summaryLines.push(
+            `Run: ${formatDurationMs(playing.itemElapsedMs)} / ${formatDurationMs(playing.itemDurationMs)}`
+          );
+        }
+      }
+      const lastDiag = Array.isArray(item.meta?.recentDiagnostics)
+        ? item.meta.recentDiagnostics[item.meta.recentDiagnostics.length - 1]
+        : null;
+      if (lastDiag?.message) {
+        summaryLines.push(`Diag: [${String(lastDiag.type || "-")}] ${String(lastDiag.message)}`);
+      }
+      const lastEvent = Array.isArray(item.recentEvents)
+        ? item.recentEvents[item.recentEvents.length - 1]
+        : null;
+      if (lastEvent?.message) {
+        summaryLines.push(`Event: [${String(lastEvent.type || "-")}] ${String(lastEvent.message)}`);
       }
       if (item.lastError) {
         summaryLines.push(`Error: ${item.lastError}`);
@@ -2277,7 +2378,7 @@ async function uploadAndInstallAppUpdate() {
     showNotice(
       "success",
       "Update Sent",
-      "APK uploaded and install command sent. On some TVs, manual install confirmation may still be required.",
+      "APK sent. Follow the TV prompt if needed.",
       7000
     );
   } catch (err) {

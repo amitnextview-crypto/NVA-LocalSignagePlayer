@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { ActivityIndicator, Animated, Easing, Image, ScrollView, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Animated, Dimensions, Easing, Image, ScrollView, StyleSheet, Text, View } from "react-native";
 import { ViewType } from "react-native-video";
 import { WebView } from "react-native-webview";
 import RNFS from "react-native-fs";
@@ -12,6 +12,7 @@ import {
   prefetchMediaItems,
 } from "../services/mediaService";
 import { getServer } from "../services/serverService";
+import { buildPlaybackResumeKey, getPlaylistAdvanceState } from "./videoPlaybackState";
 import NativeVideoPlayer from "./NativeVideoPlayer";
 
 const SOURCE_TYPES = {
@@ -22,6 +23,7 @@ const SOURCE_TYPES = {
 const VIDEO_FILE_RE = /\.(mp4|m4v|mov|mkv|webm)(\?.*)?$/i;
 const LARGE_VIDEO_STREAM_THRESHOLD_BYTES = 300 * 1024 * 1024;
 const HOLD_LARGE_VIDEO_UNTIL_CACHED = false;
+const VIDEO_PROGRESS_SAVE_INTERVAL_MS = 1000;
 
 function normalizeWebUrl(url: string) {
   const value = String(url || "").trim();
@@ -141,9 +143,16 @@ function getMediaCacheIdentity(item: any) {
 
 function buildListSignature(list: any[]) {
   if (!Array.isArray(list) || !list.length) return "empty";
-  const first = getMediaStableIdentity(list[0]);
-  const last = getMediaStableIdentity(list[list.length - 1]);
-  return `${list.length}|${first}|${last}`;
+  let hash = 0;
+  const parts: string[] = [];
+  for (const item of list) {
+    const part = getMediaStableIdentity(item);
+    parts.push(part);
+    for (let i = 0; i < part.length; i += 1) {
+      hash = (hash * 33 + part.charCodeAt(i)) | 0;
+    }
+  }
+  return `${list.length}|${Math.abs(hash).toString(36)}|${parts.join("||")}`;
 }
 
 function areMediaListsEqual(a: any[], b: any[]) {
@@ -191,11 +200,15 @@ export default function SlideRenderer({
   config,
   sectionIndex,
   mediaVersion,
+  playlistSyncAt,
+  contentResetVersion,
+  sectionTimeline,
   processingMessage,
   processingCount,
   onPlaybackChange,
   onPlaybackError,
 }: any) {
+  const initialWindowSize = Dimensions.get("window");
   const [files, setFiles] = useState<any[]>([]);
   const [index, setIndex] = useState(0);
   const [uri, setUri] = useState("");
@@ -207,6 +220,7 @@ export default function SlideRenderer({
   const [showBufferIndicator, setShowBufferIndicator] = useState(false);
   const bufferTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [textContent, setTextContent] = useState("");
+  const [playbackClock, setPlaybackClock] = useState(0);
   const [pdfSlotUrls, setPdfSlotUrls] = useState<{ a: string; b: string }>({ a: "", b: "" });
   const [pdfSlotLoaded, setPdfSlotLoaded] = useState<{ a: boolean; b: boolean }>({ a: false, b: false });
   const [pdfVisibleSlot, setPdfVisibleSlot] = useState<"a" | "b">("a");
@@ -220,10 +234,19 @@ export default function SlideRenderer({
   });
   const [imageVisibleSlot, setImageVisibleSlot] = useState<"a" | "b">("a");
   const [forceLocalRestart, setForceLocalRestart] = useState(false);
+  const [resumePositionMs, setResumePositionMs] = useState(0);
+  const [transitionBackdrop, setTransitionBackdrop] = useState<any | null>(null);
+  const [containerLayout, setContainerLayout] = useState({
+    width: Math.max(1, Math.round(initialWindowSize.width)),
+    height: Math.max(1, Math.round(initialWindowSize.height)),
+  });
+  const [playlistRestoreReady, setPlaylistRestoreReady] = useState(false);
   const server = getServer();
 
   const translateX = useRef(new Animated.Value(0)).current;
   const translateY = useRef(new Animated.Value(0)).current;
+  const backdropTranslateX = useRef(new Animated.Value(0)).current;
+  const backdropTranslateY = useRef(new Animated.Value(0)).current;
   const scale = useRef(new Animated.Value(0.95)).current;
   const opacity = useRef(new Animated.Value(1)).current;
   const rotateY = useRef(new Animated.Value(0)).current;
@@ -248,10 +271,18 @@ export default function SlideRenderer({
   const pendingLocalSwitchRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const videoTransientErrorRef = useRef<Record<string, number>>({});
   const badMediaRef = useRef<Record<string, number>>({});
+  const durationByIdentityRef = useRef<Record<string, number>>({});
+  const videoProgressRef = useRef({ positionMs: 0, durationMs: 0 });
+  const lastStableVideoProgressRef = useRef<Record<string, number>>({});
+  const lastVideoRecoveryAtRef = useRef<Record<string, number>>({});
+  const lastProgressPersistAtRef = useRef(0);
+  const lastObservedVideoPositionRef = useRef(0);
+  const lastObservedVideoProgressAtRef = useRef(0);
   const skipLoopGuardRef = useRef(0);
   const readyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const videoReadyRef = useRef(false);
   const lastRestoreSignatureRef = useRef<string>("");
+  const lastAnimatedVideoIdentityRef = useRef<string>("");
   const imageDesiredSlotRef = useRef<"a" | "b">("a");
   const cachePathSetRef = useRef<Set<string>>(new Set());
   const cacheRefreshDoneRef = useRef<Set<string>>(new Set());
@@ -259,12 +290,154 @@ export default function SlideRenderer({
   const lastIndexChangeAtRef = useRef(Date.now());
   const videoGateLoopRef = useRef(0);
   const prefetchKeyRef = useRef<string>("");
+  const resumeRestoreAllowedRef = useRef(true);
+  const transitionBackdropTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastRenderSnapshotRef = useRef<any | null>(null);
+  const pendingAdvanceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastVideoAdvanceIdentityRef = useRef<string>("");
   const EMPTY_FETCH_CLEAR_THRESHOLD = 3;
   const MAX_SINGLE_VIDEO_RETRY = 3;
   const MAX_TRANSIENT_VIDEO_RETRY = 2;
   const MAX_BAD_MEDIA_RETRY = 3;
-  const VIDEO_READY_TIMEOUT_MS = 8000;
+  const VIDEO_READY_TIMEOUT_MS = 20000;
   const MAX_PDF_RETRY = 3;
+  const durationStoreKey = `playback:durations:section:${sectionIndex}`;
+  const lastSectionStateKey = `playback:last:section:${sectionIndex}`;
+
+  const getPlaybackResumeKey = (item: any) =>
+    buildPlaybackResumeKey(sectionIndex, getMediaContentIdentity(item));
+
+  const persistDurationMap = async () => {
+    try {
+      await AsyncStorage.setItem(durationStoreKey, JSON.stringify(durationByIdentityRef.current));
+    } catch {
+      // ignore persistence errors
+    }
+  };
+
+  const clearSavedPlaybackPosition = async (item: any) => {
+    if (!item) return;
+    try {
+      await AsyncStorage.removeItem(getPlaybackResumeKey(item));
+    } catch {
+      // ignore cleanup errors
+    }
+  };
+
+  const clearAllSavedVideoPositions = async (list: any[]) => {
+    if (!Array.isArray(list) || !list.length) return;
+    try {
+      await Promise.allSettled(
+        list
+          .filter((item) => !!item && isVideoFile(item))
+          .map((item) => AsyncStorage.removeItem(getPlaybackResumeKey(item)))
+      );
+    } catch {
+      // ignore cleanup errors
+    }
+  };
+
+  const clearSectionPlaybackState = async () => {
+    try {
+      await AsyncStorage.removeItem(lastSectionStateKey);
+    } catch {
+      // ignore cleanup errors
+    }
+  };
+
+  const savePlaybackProgress = async (item: any, positionMs: number, durationMs: number) => {
+    if (!item || !isVideoFile(item)) return;
+    const safePosition = Math.max(0, Math.round(positionMs || 0));
+    const safeDuration = Math.max(0, Math.round(durationMs || 0));
+    const now = Date.now();
+    if (now - lastProgressPersistAtRef.current < VIDEO_PROGRESS_SAVE_INTERVAL_MS) return;
+    lastProgressPersistAtRef.current = now;
+    try {
+      if (safeDuration > 1000) {
+        const identity = getMediaContentIdentity(item);
+        if (durationByIdentityRef.current[identity] !== safeDuration) {
+          durationByIdentityRef.current = {
+            ...durationByIdentityRef.current,
+            [identity]: safeDuration,
+          };
+          await persistDurationMap();
+        }
+      }
+      const nearEnd =
+        safeDuration > 3000 && safePosition >= Math.max(0, safeDuration - 1500);
+      if (nearEnd || safePosition <= 0) {
+        await clearSavedPlaybackPosition(item);
+        return;
+      }
+      await AsyncStorage.setItem(
+        getPlaybackResumeKey(item),
+        JSON.stringify({
+          positionMs: safePosition,
+          durationMs: safeDuration,
+          updatedAt: new Date().toISOString(),
+        })
+      );
+    } catch {
+      // ignore persistence errors
+    }
+  };
+
+  const prepareVideoReloadFromCurrentPosition = () => {
+    const currentPosition = Math.max(0, Math.round(videoProgressRef.current.positionMs || 0));
+    if (currentPosition > 0) {
+      resumeRestoreAllowedRef.current = false;
+      setResumePositionMs(currentPosition);
+    }
+  };
+
+  const recoverUnexpectedVideoRestart = (item: any, fallbackPositionMs: number) => {
+    const safePosition = Math.max(0, Math.round(fallbackPositionMs || 0));
+    if (!item || safePosition <= 0) return false;
+    const identity = getMediaStableIdentity(item);
+    const now = Date.now();
+    const lastRecoveryAt = Number(lastVideoRecoveryAtRef.current[identity] || 0);
+    if (now - lastRecoveryAt < 2500) return false;
+    lastVideoRecoveryAtRef.current[identity] = now;
+    resumeRestoreAllowedRef.current = false;
+    setResumePositionMs(safePosition);
+    videoProgressRef.current = {
+      ...videoProgressRef.current,
+      positionMs: safePosition,
+    };
+    return true;
+  };
+
+  const queuePlaylistAdvance = (item: any) => {
+    if (!item || filesRef.current.length <= 1) return;
+    const token = `${getMediaStableIdentity(item)}|${indexRef.current}`;
+    if (!token || lastVideoAdvanceIdentityRef.current === token) return;
+    lastVideoAdvanceIdentityRef.current = token;
+    if (pendingAdvanceRef.current) {
+      clearTimeout(pendingAdvanceRef.current);
+    }
+    pendingAdvanceRef.current = setTimeout(() => {
+      pendingAdvanceRef.current = null;
+      if (!isMountedRef.current) return;
+      goNext();
+    }, 80);
+  };
+
+  const getEstimatedItemDurationMs = (item: any, fallbackSlideMs: number) => {
+    if (!item) return 0;
+    if (isVideoFile(item)) {
+      const identity = getMediaContentIdentity(item);
+      const knownDuration = Number(durationByIdentityRef.current[identity] || 0);
+      if (knownDuration > 0) return knownDuration;
+      if (
+        currentFile &&
+        identity === getMediaContentIdentity(currentFile) &&
+        videoProgressRef.current.durationMs > 0
+      ) {
+        return Math.round(videoProgressRef.current.durationMs);
+      }
+    }
+    return fallbackSlideMs;
+  };
 
   const sectionConfig = config?.sections?.[sectionIndex] || {};
   const sourceType = sectionConfig?.sourceType || SOURCE_TYPES.multimedia;
@@ -273,11 +446,46 @@ export default function SlideRenderer({
   const mediaRotateLayerStyle = styles.fillLayer;
 
   useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const raw = await AsyncStorage.getItem(durationStoreKey);
+        if (cancelled || !raw) return;
+        const parsed = JSON.parse(String(raw || "{}"));
+        if (parsed && typeof parsed === "object") {
+          durationByIdentityRef.current = parsed;
+        }
+      } catch {
+        // ignore restore errors
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [durationStoreKey]);
+
+  useEffect(() => {
+    if (files.length && (index < 0 || index >= files.length)) {
+      setIndex(0);
+      return;
+    }
     filesRef.current = files;
     indexRef.current = index;
     setForceLocalRestart(false);
     lastIndexChangeAtRef.current = Date.now();
     videoGateLoopRef.current = 0;
+    lastVideoAdvanceIdentityRef.current = "";
+    if (pendingAdvanceRef.current) {
+      clearTimeout(pendingAdvanceRef.current);
+      pendingAdvanceRef.current = null;
+    }
+    const activeFile = files[index];
+    if (activeFile && isVideoFile(activeFile)) {
+      const identity = getMediaStableIdentity(activeFile);
+      if (identity && !lastStableVideoProgressRef.current[identity]) {
+        lastStableVideoProgressRef.current[identity] = 0;
+      }
+    }
   }, [files, index]);
 
   useEffect(() => {
@@ -296,7 +504,9 @@ export default function SlideRenderer({
     const signature = buildListSignature(files);
     if (lastRestoreSignatureRef.current === signature) return;
     lastRestoreSignatureRef.current = signature;
-    const key = `playback:last:section:${sectionIndex}`;
+    resumeRestoreAllowedRef.current = false;
+    setPlaylistRestoreReady(false);
+    const key = lastSectionStateKey;
 
     let cancelled = false;
     (async () => {
@@ -304,6 +514,13 @@ export default function SlideRenderer({
         const raw = await AsyncStorage.getItem(key);
         if (!raw || cancelled) return;
         const saved = JSON.parse(String(raw || "{}"));
+        const savedSignature = String(saved?.signature || "");
+        if (!savedSignature || savedSignature !== signature) {
+          await clearSectionPlaybackState();
+          await clearAllSavedVideoPositions(files);
+          return;
+        }
+        resumeRestoreAllowedRef.current = true;
         const savedIdentity = String(saved?.identity || "");
         const savedIndex = Number(saved?.index || 0);
         if (savedIdentity) {
@@ -320,29 +537,34 @@ export default function SlideRenderer({
         }
       } catch {
         // ignore restore errors
+      } finally {
+        if (!cancelled) {
+          setPlaylistRestoreReady(true);
+        }
       }
     })();
 
     return () => {
       cancelled = true;
     };
-  }, [files, sourceType, sectionIndex]);
+  }, [files, sourceType, sectionIndex, lastSectionStateKey]);
 
   useEffect(() => {
     if (sourceType !== SOURCE_TYPES.multimedia) return;
     if (!files.length) return;
     const current = files[index];
     if (!current) return;
-    const key = `playback:last:section:${sectionIndex}`;
+    const key = lastSectionStateKey;
     const payload = {
       identity: getMediaStableIdentity(current),
+      signature: buildListSignature(files),
       index,
       updatedAt: new Date().toISOString(),
     };
     AsyncStorage.setItem(key, JSON.stringify(payload)).catch(() => {
       // ignore save errors
     });
-  }, [files, index, sourceType, sectionIndex]);
+  }, [files, index, sourceType, sectionIndex, lastSectionStateKey]);
 
   useEffect(() => {
     pdfSlotUrlsRef.current = pdfSlotUrls;
@@ -378,6 +600,8 @@ export default function SlideRenderer({
       if (retryTimerRef.current) clearTimeout(retryTimerRef.current);
       if (pendingLocalSwitchRef.current) clearTimeout(pendingLocalSwitchRef.current);
       if (readyTimeoutRef.current) clearTimeout(readyTimeoutRef.current);
+      if (transitionBackdropTimerRef.current) clearTimeout(transitionBackdropTimerRef.current);
+      if (pendingAdvanceRef.current) clearTimeout(pendingAdvanceRef.current);
     };
   }, []);
 
@@ -436,6 +660,7 @@ export default function SlideRenderer({
       const currentCount = videoTransientErrorRef.current[errorKey] || 0;
       if (currentCount < MAX_TRANSIENT_VIDEO_RETRY) {
         videoTransientErrorRef.current[errorKey] = currentCount + 1;
+        prepareVideoReloadFromCurrentPosition();
         setTimeout(() => {
           if (!isMountedRef.current) return;
           setVideoReloadToken((prev) => prev + 1);
@@ -456,12 +681,14 @@ export default function SlideRenderer({
       server &&
       activeFile?.url
     ) {
+      prepareVideoReloadFromCurrentPosition();
       setUri(buildRemoteMediaUri(server, activeFile.url, activeFile?.mtimeMs || mediaVersion));
       setVideoReloadToken((prev) => prev + 1);
       return;
     }
 
     if (isActiveVideo && isMultiPaneLayout) {
+      prepareVideoReloadFromCurrentPosition();
       const alternateViewType =
         videoViewType === ViewType.TEXTURE ? ViewType.SURFACE : ViewType.TEXTURE;
       setVideoViewType(alternateViewType);
@@ -472,6 +699,7 @@ export default function SlideRenderer({
     if (isActiveVideo && files.length === 1) {
     if (videoRetryCountRef.current < MAX_SINGLE_VIDEO_RETRY) {
       videoRetryCountRef.current += 1;
+      prepareVideoReloadFromCurrentPosition();
       setTimeout(() => {
         if (!isMountedRef.current) return;
         setVideoReloadToken((prev) => prev + 1);
@@ -668,6 +896,18 @@ export default function SlideRenderer({
       return;
     }
 
+    if (
+      isVideo &&
+      uri &&
+      nextUri &&
+      nextUri !== uri &&
+      /^https?:\/\//i.test(uri) &&
+      /^file:\/\//i.test(nextUri)
+    ) {
+      // Keep the active stream stable; switch to local on the next video load only.
+      return;
+    }
+
     pinnedContentIdentityRef.current = contentIdentity;
     if (!nextUri && uri && pinnedContentIdentityRef.current === contentIdentity) {
       // Avoid dropping to blank when source is temporarily unavailable.
@@ -686,6 +926,62 @@ export default function SlideRenderer({
     }
     setUri(nextUri || "");
   }, [files, index, server, sourceType, mediaVersion]);
+
+  useEffect(() => {
+    if (!playlistRestoreReady) return;
+    if (sourceType !== SOURCE_TYPES.multimedia) {
+      setResumePositionMs(0);
+      videoProgressRef.current = { positionMs: 0, durationMs: 0 };
+      return;
+    }
+    const active = files[index];
+    if (!active || !isVideoFile(active)) {
+      setResumePositionMs(0);
+      videoProgressRef.current = { positionMs: 0, durationMs: 0 };
+      return;
+    }
+    const activeIdentity = getMediaContentIdentity(active);
+    const knownDuration = Math.max(0, Number(durationByIdentityRef.current[activeIdentity] || 0));
+    if (!resumeRestoreAllowedRef.current) {
+      setResumePositionMs(0);
+      videoProgressRef.current = { positionMs: 0, durationMs: knownDuration };
+      return;
+    }
+    resumeRestoreAllowedRef.current = false;
+
+    let cancelled = false;
+    (async () => {
+      try {
+        const raw = await AsyncStorage.getItem(getPlaybackResumeKey(active));
+        if (cancelled || !raw) {
+          if (!cancelled) setResumePositionMs(0);
+          return;
+        }
+        const parsed = JSON.parse(String(raw || "{}"));
+        const restoredPosition = Math.max(0, Math.round(Number(parsed?.positionMs || 0)));
+        const restoredDuration = Math.max(0, Math.round(Number(parsed?.durationMs || 0)));
+        videoProgressRef.current = {
+          positionMs: restoredPosition,
+          durationMs: restoredDuration,
+        };
+        if (!cancelled) {
+          setResumePositionMs(restoredPosition);
+        }
+        if (restoredDuration > 1000 && durationByIdentityRef.current[activeIdentity] !== restoredDuration) {
+          durationByIdentityRef.current = {
+            ...durationByIdentityRef.current,
+            [activeIdentity]: restoredDuration,
+          };
+        }
+      } catch {
+        if (!cancelled) setResumePositionMs(0);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [files, index, sourceType, sectionIndex, playlistRestoreReady]);
 
   useEffect(() => {
     if (sourceType !== SOURCE_TYPES.multimedia) {
@@ -794,34 +1090,34 @@ export default function SlideRenderer({
     const watchdog = setInterval(() => {
       if (!filesRef.current.length || filesRef.current.length === 1) return;
       const elapsed = Date.now() - lastIndexChangeAtRef.current;
-      if (elapsed > getSlideDurationMs() * 1.6) {
+      if (elapsed > getSlideDurationMs() * 1.6 && isNextImageReady()) {
         goNext();
       }
     }, 1200);
     return () => clearInterval(watchdog);
-  }, [files, index, sourceType, config, sectionIndex]);
+  }, [files, index, sourceType, config, sectionIndex, imageSlotLoaded, imageVisibleSlot]);
 
   const getNextIndexForPlayback = () => {
     if (!files.length) return indexRef.current;
     if (files.length === 1) return indexRef.current;
-    const total = filesRef.current.length;
-    const start = (indexRef.current + 1) % total;
-    const HEAVY_VIDEO_GATE_BYTES = 30 * 1024 * 1024;
-    for (let step = 0; step < total; step += 1) {
-      const idx = (start + step) % total;
-      const file = filesRef.current[idx];
-      if (!file) continue;
-      if (!isVideoFile(file)) return idx;
-      const size = Number(file?.size || 0);
-      if (size <= HEAVY_VIDEO_GATE_BYTES) return idx;
-      const pathKey = String(file?.url || "");
-      const progress = pathKey ? Number(cacheProgressByPath[pathKey] || 0) : 0;
-      const hasLocalPath = !!String(file?.localPath || "").trim();
-      const hasLocalUri = /^file:\/\//i.test(String(file?.remoteUrl || ""));
-      const hasLocal = hasLocalPath || hasLocalUri || progress >= 100;
-      if (hasLocal || progress >= 5) return idx;
-    }
-    return indexRef.current;
+    return getPlaylistAdvanceState(filesRef.current.length, indexRef.current).nextIndex;
+  };
+
+  const isNextImageReady = () => {
+    if (!filesRef.current.length || filesRef.current.length < 2) return true;
+    const nextIndex = getNextIndexForPlayback();
+    const nextFile = filesRef.current[nextIndex];
+    if (!nextFile || isVideoFile(nextFile)) return true;
+    const nextType = String(nextFile?.type || "").toLowerCase();
+    const nextIsText =
+      nextType === "text" || /\.txt$/i.test(nextFile?.originalName || nextFile?.name || "");
+    const nextIsPdf =
+      nextType === "pdf" || /\.pdf$/i.test(nextFile?.originalName || nextFile?.name || "");
+    if (nextIsText || nextIsPdf) return true;
+    const nextSlot = imageVisibleSlot === "a" ? "b" : "a";
+    const nextUri = imageSlotUrlsRef.current[nextSlot];
+    if (!nextUri) return false;
+    return !!imageSlotLoaded[nextSlot];
   };
 
   useEffect(() => {
@@ -911,8 +1207,8 @@ export default function SlideRenderer({
                 const exists = await RNFS.exists(localPath);
                 if (exists) {
                   if (isVideoFile(activeItem)) {
-                    setUri(localUri);
-                    setVideoReloadToken((prev) => prev + 1);
+                    // Do not swap the current video source mid-run when cache finishes.
+                    // Smart TVs can blank out after this transition and stay stuck until data clear.
                     return;
                   }
                   if (!uri) {
@@ -954,11 +1250,7 @@ export default function SlideRenderer({
 
     if (!hasLocalPlayableUri || !usingRemote) return;
 
-    if (cacheProgress >= 100) {
-      // Prefer switching at a safe boundary to avoid mid-play glitches.
-      setForceLocalRestart(true);
-      return;
-    }
+    if (cacheProgress >= 100) return;
 
     if (pendingLocalSwitchRef.current) return;
 
@@ -966,8 +1258,7 @@ export default function SlideRenderer({
     pendingLocalSwitchRef.current = setTimeout(() => {
       pendingLocalSwitchRef.current = null;
       if (!isMountedRef.current) return;
-      // Avoid mid-playback glitch: allow restart at end to switch to local.
-      setForceLocalRestart(true);
+      // Keep the current source stable; cached/local source will be used on the next natural load.
     }, 3000);
 
     return () => {
@@ -989,8 +1280,7 @@ export default function SlideRenderer({
       return hasLocalPath || hasLocalUri || progress >= 100;
     });
     if (!allFilesCached) return;
-    // Automatic playlist switch to local once full cache is ready.
-    setForceLocalRestart(true);
+    // Full cache should help the next load; do not restart the active video here.
   }, [files, sourceType, cacheProgressByPath]);
 
   useEffect(() => {
@@ -1001,9 +1291,7 @@ export default function SlideRenderer({
     const localPlayableUri = normalizeMediaUri(String(file?.remoteUrl || ""));
     const hasLocalPlayableUri = /^file:\/\//i.test(localPlayableUri);
     const usingRemote = /^https?:\/\//i.test(uri);
-    if (hasLocalPlayableUri && usingRemote) {
-      setForceLocalRestart(true);
-    }
+    if (hasLocalPlayableUri && usingRemote) return;
   }, [files, index, uri, sourceType]);
 
   useEffect(() => {
@@ -1011,7 +1299,7 @@ export default function SlideRenderer({
     if (!files.length) return;
     const file = files[index];
     if (!isVideoFile(file)) return;
-    videoFade.setValue(0);
+    videoFade.setValue(1);
   }, [files, index, uri, sourceType, videoFade]);
 
   useEffect(() => {
@@ -1029,6 +1317,12 @@ export default function SlideRenderer({
     if (!files.length) return;
     const file = files[index];
     if (!isVideoFile(file)) return;
+    const visualIdentity = `${getMediaContentIdentity(file)}|${uri}`;
+    if (lastAnimatedVideoIdentityRef.current !== visualIdentity) {
+      lastAnimatedVideoIdentityRef.current = visualIdentity;
+      videoFade.stopAnimation();
+      videoFade.setValue(1);
+    }
     videoReadyRef.current = false;
     if (readyTimeoutRef.current) clearTimeout(readyTimeoutRef.current);
     readyTimeoutRef.current = setTimeout(() => {
@@ -1042,23 +1336,62 @@ export default function SlideRenderer({
         readyTimeoutRef.current = null;
       }
     };
-  }, [files, index, uri, sourceType]);
+  }, [files, index, uri, sourceType, videoFade]);
 
   useEffect(() => {
-    const animationType = config?.animation || "slide";
+    if (sourceType !== SOURCE_TYPES.multimedia) return;
+    if (!files.length) return;
+    const file = files[index];
+    if (!isVideoFile(file)) return;
+    const timer = setInterval(() => {
+      if (!isMountedRef.current) return;
+      if (videoBuffering) return;
+      const durationMs = Math.max(0, Math.round(videoProgressRef.current.durationMs || 0));
+      const positionMs = Math.max(0, Math.round(videoProgressRef.current.positionMs || 0));
+      if (durationMs <= 2000) return;
+      if (positionMs >= Math.max(0, durationMs - 1200)) return;
+      if (positionMs > lastObservedVideoPositionRef.current + 400) {
+        lastObservedVideoPositionRef.current = positionMs;
+        lastObservedVideoProgressAtRef.current = Date.now();
+        return;
+      }
+      const stalledForMs = Date.now() - Number(lastObservedVideoProgressAtRef.current || 0);
+      if (positionMs > 0 && stalledForMs > 12000) {
+        lastObservedVideoProgressAtRef.current = Date.now();
+        prepareVideoReloadFromCurrentPosition();
+        setVideoReloadToken((prev) => prev + 1);
+      }
+    }, 3000);
+    return () => clearInterval(timer);
+  }, [files, index, sourceType, videoBuffering]);
+
+  useEffect(() => {
+    const localSectionHasVideo = files.some((entry) => isVideoFile(entry));
+    const localSlideOverscanPx = 2;
+    const active = files[index];
+    const activeIsVideo = isVideoFile(active);
+    const animationType =
+      localSectionHasVideo && activeIsVideo ? "none" : config?.animation || "slide";
     const direction =
       config?.sections?.[sectionIndex]?.slideDirection || "left";
+    const introOpacity = activeIsVideo ? 0.992 : 0.975;
+    const settleDuration = activeIsVideo ? 260 : 320;
+    const settleEase = Easing.out(Easing.bezier(0.22, 1, 0.36, 1));
+    const slideEase = Easing.linear;
+    const slideDuration = activeIsVideo ? 980 : 700;
 
     if (animationType === "fade") {
       translateX.setValue(0);
       translateY.setValue(0);
+      backdropTranslateX.setValue(0);
+      backdropTranslateY.setValue(0);
       rotateY.setValue(0);
       scale.setValue(1);
-      opacity.setValue(0);
+      opacity.setValue(introOpacity);
       Animated.timing(opacity, {
         toValue: 1,
-        duration: 460,
-        easing: Easing.out(Easing.cubic),
+        duration: settleDuration,
+        easing: settleEase,
         useNativeDriver: true,
       }).start();
       return;
@@ -1067,20 +1400,22 @@ export default function SlideRenderer({
     if (animationType === "zoom") {
       translateX.setValue(0);
       translateY.setValue(0);
+      backdropTranslateX.setValue(0);
+      backdropTranslateY.setValue(0);
       rotateY.setValue(0);
-      opacity.setValue(0.9);
-      scale.setValue(1.08);
+      opacity.setValue(introOpacity);
+      scale.setValue(activeIsVideo ? 1.018 : 1.04);
       Animated.parallel([
         Animated.timing(scale, {
           toValue: 1,
-          duration: 460,
-          easing: Easing.out(Easing.cubic),
+          duration: settleDuration + 20,
+          easing: settleEase,
           useNativeDriver: true,
         }),
         Animated.timing(opacity, {
           toValue: 1,
-          duration: 420,
-          easing: Easing.out(Easing.cubic),
+          duration: settleDuration,
+          easing: settleEase,
           useNativeDriver: true,
         }),
       ]).start();
@@ -1090,20 +1425,22 @@ export default function SlideRenderer({
     if (animationType === "flip") {
       translateX.setValue(0);
       translateY.setValue(0);
+      backdropTranslateX.setValue(0);
+      backdropTranslateY.setValue(0);
       scale.setValue(1);
-      opacity.setValue(0.92);
-      rotateY.setValue(14);
+      opacity.setValue(Math.max(introOpacity, 0.985));
+      rotateY.setValue(activeIsVideo ? 4 : 7);
       Animated.parallel([
         Animated.timing(rotateY, {
           toValue: 0,
-          duration: 500,
-          easing: Easing.out(Easing.cubic),
+          duration: settleDuration + 40,
+          easing: settleEase,
           useNativeDriver: true,
         }),
         Animated.timing(opacity, {
           toValue: 1,
-          duration: 420,
-          easing: Easing.out(Easing.cubic),
+          duration: settleDuration,
+          easing: settleEase,
           useNativeDriver: true,
         }),
       ]).start();
@@ -1113,42 +1450,65 @@ export default function SlideRenderer({
     if (animationType === "none") {
       translateX.setValue(0);
       translateY.setValue(0);
+      backdropTranslateX.setValue(0);
+      backdropTranslateY.setValue(0);
       opacity.setValue(1);
       rotateY.setValue(0);
       scale.setValue(1);
       return;
     }
 
-    // Slide intro animation for next media, tuned for smoother motion.
-    const distance = 140;
-    opacity.setValue(0.94);
+    // Start the next item fully outside the visible section so slide begins from the edge.
+    const horizontalDistance = Math.max(1, Math.round(containerLayout.width) + localSlideOverscanPx);
+    const verticalDistance = Math.max(1, Math.round(containerLayout.height) + localSlideOverscanPx);
+    opacity.setValue(1);
     scale.setValue(1);
     rotateY.setValue(0);
     translateX.setValue(0);
     translateY.setValue(0);
-    if (direction === "left") translateX.setValue(distance);
-    if (direction === "right") translateX.setValue(-distance);
-    if (direction === "top") translateY.setValue(distance);
-    if (direction === "bottom") translateY.setValue(-distance);
+    backdropTranslateX.setValue(0);
+    backdropTranslateY.setValue(0);
+    if (direction === "left") translateX.setValue(horizontalDistance);
+    if (direction === "right") translateX.setValue(-horizontalDistance);
+    if (direction === "top") translateY.setValue(verticalDistance);
+    if (direction === "bottom") translateY.setValue(-verticalDistance);
+    if (direction === "left") backdropTranslateX.setValue(0);
+    if (direction === "right") backdropTranslateX.setValue(0);
+    if (direction === "top") backdropTranslateY.setValue(0);
+    if (direction === "bottom") backdropTranslateY.setValue(0);
 
     Animated.parallel([
       Animated.timing(
-        direction === "left" || direction === "right" ? translateX : translateY,
-        {
-          toValue: 0,
-          duration: 520,
-          easing: Easing.out(Easing.cubic),
-          useNativeDriver: true,
-        }
-      ),
-      Animated.timing(opacity, {
-        toValue: 1,
-        duration: 420,
-        easing: Easing.out(Easing.cubic),
-        useNativeDriver: true,
-      }),
-    ]).start();
-  }, [index, config?.animation, config?.sections, sectionIndex, opacity, rotateY, scale, translateX, translateY]);
+          direction === "left" || direction === "right" ? translateX : translateY,
+          {
+            toValue: 0,
+            duration: slideDuration,
+            easing: slideEase,
+            useNativeDriver: true,
+          }
+        ),
+        Animated.timing(
+          direction === "left"
+            ? backdropTranslateX
+            : direction === "right"
+            ? backdropTranslateX
+            : backdropTranslateY,
+          {
+            toValue:
+              direction === "left"
+                ? -horizontalDistance
+                : direction === "right"
+                ? horizontalDistance
+                : direction === "top"
+                ? -verticalDistance
+                : verticalDistance,
+            duration: slideDuration,
+            easing: slideEase,
+            useNativeDriver: true,
+          }
+        ),
+      ]).start();
+  }, [files, index, config?.animation, config?.sections, sectionIndex, opacity, rotateY, scale, translateX, translateY, backdropTranslateX, backdropTranslateY, containerLayout]);
 
   useEffect(() => {
     if (sourceType !== SOURCE_TYPES.multimedia) return;
@@ -1162,17 +1522,138 @@ export default function SlideRenderer({
         (config?.sections?.[sectionIndex]?.slideDuration ||
           config?.slideDuration ||
           5) * 1000;
-      timerRef.current = setTimeout(goNext, duration);
+      timerRef.current = setTimeout(() => {
+        if (isNextImageReady()) {
+          goNext();
+          return;
+        }
+        timerRef.current = setTimeout(() => {
+          if (isNextImageReady()) {
+            goNext();
+            return;
+          }
+          goNext();
+        }, 450);
+      }, duration);
     }
     return () => {
       if (timerRef.current) clearTimeout(timerRef.current);
     };
-  }, [index, files, config, sectionIndex, sourceType]);
+  }, [index, files, config, sectionIndex, sourceType, imageSlotLoaded, imageVisibleSlot]);
+
+  useEffect(() => {
+    if (sourceType !== SOURCE_TYPES.multimedia) return;
+    if (!files.length) return;
+    const targetAt = Number(sectionTimeline?.syncAt || playlistSyncAt || 0);
+    if (!targetAt) return;
+    const timelineSignature = [
+      String(sectionTimeline?.cycleId || ""),
+      String(sectionTimeline?.mediaSignature || ""),
+      Number(sectionTimeline?.fileCount || 0),
+    ].join("|");
+
+    let cancelled = false;
+    const runSync = async () => {
+      if (cancelled || !isMountedRef.current) return;
+      resumeRestoreAllowedRef.current = false;
+    videoProgressRef.current = { positionMs: 0, durationMs: 0 };
+    lastObservedVideoPositionRef.current = 0;
+    lastObservedVideoProgressAtRef.current = 0;
+    setResumePositionMs(0);
+      setForceLocalRestart(false);
+      lastStableVideoProgressRef.current = {};
+      lastVideoRecoveryAtRef.current = {};
+      await clearSectionPlaybackState();
+      await clearAllSavedVideoPositions(filesRef.current);
+      if (cancelled || !isMountedRef.current) return;
+      setIndex(0);
+      setVideoReloadToken((prev) => prev + 1);
+    };
+
+    const delay = Math.max(0, targetAt - Date.now());
+    const timer = setTimeout(() => {
+      runSync().catch(() => {
+        // ignore sync errors
+      });
+    }, delay);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [
+    playlistSyncAt,
+    sectionTimeline?.syncAt,
+    sectionTimeline?.cycleId,
+    sectionTimeline?.mediaSignature,
+    sectionTimeline?.fileCount,
+    sourceType,
+    files.length,
+    sectionIndex,
+    lastSectionStateKey,
+  ]);
+
+  useEffect(() => {
+    if (sourceType !== SOURCE_TYPES.multimedia) return;
+    if (!files.length) return;
+    const active = files[index];
+    if (isVideoFile(active)) return;
+    const timer = setInterval(() => {
+      if (!isMountedRef.current) return;
+      setPlaybackClock((prev) => prev + 1);
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [files, sourceType, index]);
+
+  useEffect(() => {
+    if (!contentResetVersion) return;
+    pinnedMediaUriRef.current = null;
+    pinnedContentIdentityRef.current = "";
+    lastGoodUriByIdentityRef.current = {};
+    lastGoodAnyUriRef.current = "";
+    videoTransientErrorRef.current = {};
+    badMediaRef.current = {};
+    videoProgressRef.current = { positionMs: 0, durationMs: 0 };
+    lastStableVideoProgressRef.current = {};
+    lastVideoRecoveryAtRef.current = {};
+    skipLoopGuardRef.current = 0;
+    emptyFetchCountRef.current = 0;
+    videoRetryCountRef.current = 0;
+    setResumePositionMs(0);
+    setForceLocalRestart(false);
+    setVideoBuffering(false);
+    setShowBufferIndicator(false);
+    setTextContent("");
+    setPdfSlotUrls({ a: "", b: "" });
+    setPdfSlotLoaded({ a: false, b: false });
+    setPdfVisibleSlot("a");
+    setImageSlotUrls({ a: "", b: "" });
+    setImageSlotLoaded({ a: false, b: false });
+    setImageVisibleSlot("a");
+    setTransitionBackdrop(null);
+    setVideoReloadToken((prev) => prev + 1);
+    setPdfReloadToken((prev) => prev + 1);
+  }, [contentResetVersion]);
 
   const goNext = () => {
     if (!files.length) return;
     if (files.length === 1) return;
-    const nextIndex = getNextIndexForPlayback();
+    const { nextIndex, wrappedToStart } = getPlaylistAdvanceState(
+      filesRef.current.length,
+      indexRef.current
+    );
+    resumeRestoreAllowedRef.current = false;
+    setResumePositionMs(0);
+    clearSavedPlaybackPosition(filesRef.current[indexRef.current]).catch(() => {
+      // ignore
+    });
+    if (wrappedToStart) {
+      lastStableVideoProgressRef.current = {};
+      lastVideoRecoveryAtRef.current = {};
+      clearAllSavedVideoPositions(filesRef.current).catch(() => {
+        // ignore cleanup errors
+      });
+    }
     setIndex(nextIndex);
   };
 
@@ -1180,6 +1661,8 @@ export default function SlideRenderer({
 
   const currentFile = files[index] || null;
   const currentFileType = String(currentFile?.type || "").toLowerCase();
+  const sectionHasVideo =
+    sourceType === SOURCE_TYPES.multimedia && files.some((entry) => isVideoFile(entry));
   const isCurrentTextFile =
     sourceType === SOURCE_TYPES.multimedia &&
     !!currentFile &&
@@ -1190,14 +1673,168 @@ export default function SlideRenderer({
   const currentIsVideo = isVideoFile(currentFile);
   const currentLocalPlayableUri = normalizeMediaUri(String(currentFile?.remoteUrl || ""));
   const currentHasLocalPlayableUri = /^file:\/\//i.test(currentLocalPlayableUri);
+  const emergencyVideoUri =
+    currentFile && currentIsVideo
+      ? lastGoodUriByIdentityRef.current[getMediaContentIdentity(currentFile)] ||
+        lastGoodAnyUriRef.current ||
+        currentLocalPlayableUri ||
+        (server && currentFile?.url
+          ? buildRemoteMediaUri(server, currentFile.url, currentFile?.mtimeMs || mediaVersion)
+          : "")
+      : "";
   const holdLargeVideo =
     sourceType === SOURCE_TYPES.multimedia &&
-    HOLD_LARGE_VIDEO_UNTIL_CACHED &&
-    currentIsVideo &&
-    currentFileSize > LARGE_VIDEO_STREAM_THRESHOLD_BYTES &&
-    !currentHasLocalPlayableUri &&
-    !!server &&
-    !!currentFile?.url;
+      HOLD_LARGE_VIDEO_UNTIL_CACHED &&
+      currentIsVideo &&
+      currentFileSize > LARGE_VIDEO_STREAM_THRESHOLD_BYTES &&
+      !currentHasLocalPlayableUri &&
+      !!server &&
+      !!currentFile?.url;
+  const transitionAnimationType = config?.animation || "slide";
+  const transitionDirection =
+    config?.sections?.[sectionIndex]?.slideDirection || "left";
+  const slideOverscanPx = 2;
+  const slideDistanceX = Math.max(1, Math.round(containerLayout.width) + slideOverscanPx);
+  const slideDistanceY = Math.max(1, Math.round(containerLayout.height) + slideOverscanPx);
+  const slideTransitionDuration = currentIsVideo ? 980 : 700;
+
+  useEffect(() => {
+    if (sectionHasVideo) {
+      setTransitionBackdrop(null);
+      lastRenderSnapshotRef.current = null;
+      return;
+    }
+    const nextSnapshot =
+      sourceType === SOURCE_TYPES.multimedia && currentFile && uri
+        ? {
+            sourceType,
+            uri,
+            file: currentFile,
+            isVideo: isVideoFile(currentFile),
+            textContent,
+          }
+        : null;
+    const previous = lastRenderSnapshotRef.current;
+    const currentIsSlideImage =
+      transitionAnimationType === "slide" &&
+      currentFile &&
+      !isVideoFile(currentFile) &&
+      String(currentFile?.type || "").toLowerCase() !== "text" &&
+      String(currentFile?.type || "").toLowerCase() !== "pdf" &&
+      !/\.txt$/i.test(currentFile?.originalName || currentFile?.name || "") &&
+      !/\.pdf$/i.test(currentFile?.originalName || currentFile?.name || "");
+    if (currentIsSlideImage) {
+      setTransitionBackdrop(null);
+      lastRenderSnapshotRef.current = nextSnapshot;
+      return;
+    }
+    if (
+      previous &&
+      nextSnapshot &&
+      previous.uri &&
+      previous.uri !== nextSnapshot.uri &&
+      !previous.isVideo
+    ) {
+      setTransitionBackdrop(previous);
+      if (transitionBackdropTimerRef.current) {
+        clearTimeout(transitionBackdropTimerRef.current);
+      }
+      transitionBackdropTimerRef.current = setTimeout(() => {
+        transitionBackdropTimerRef.current = null;
+        setTransitionBackdrop(null);
+      }, transitionAnimationType === "slide" ? slideTransitionDuration + 140 : 420);
+    }
+    lastRenderSnapshotRef.current = nextSnapshot;
+  }, [sourceType, currentFile, uri, textContent, transitionAnimationType, slideTransitionDuration, sectionHasVideo]);
+
+  const renderTransitionBackdrop = () => {
+    if (!transitionBackdrop) return null;
+    const backFile = transitionBackdrop.file;
+    if (!backFile || !transitionBackdrop.uri) return null;
+    const backType = String(backFile?.type || "").toLowerCase();
+    const backIsText =
+      backType === "text" || /\.txt$/i.test(backFile?.originalName || backFile?.name || "");
+    const backIsPdf =
+      backType === "pdf" || /\.pdf$/i.test(backFile?.originalName || backFile?.name || "");
+    if (!backIsText && !backIsPdf && transitionAnimationType === "slide") {
+      return null;
+    }
+    const animatedBackdropStyle =
+      transitionAnimationType === "slide" && !sectionHasVideo
+        ? [
+            styles.fillLayer,
+            styles.transitionBackdrop,
+            {
+              transform: [
+                {
+                  translateX:
+                    transitionDirection === "left"
+                      ? backdropTranslateX
+                      : transitionDirection === "right"
+                      ? backdropTranslateX
+                      : 0,
+                },
+                {
+                  translateY:
+                    transitionDirection === "top"
+                      ? backdropTranslateY
+                      : transitionDirection === "bottom"
+                      ? backdropTranslateY
+                      : 0,
+                },
+              ],
+            },
+          ]
+        : [styles.fillLayer, styles.transitionBackdrop];
+
+    if (backIsText) {
+      return (
+        <Animated.View pointerEvents="none" style={animatedBackdropStyle}>
+          <ScrollView
+            style={styles.media}
+            contentContainerStyle={styles.textContentWrap}
+            showsVerticalScrollIndicator={false}
+          >
+            <Text style={styles.textContent}>
+              {String(transitionBackdrop.textContent || "")}
+            </Text>
+          </ScrollView>
+        </Animated.View>
+      );
+    }
+
+    if (backIsPdf) {
+      return (
+        <Animated.View pointerEvents="none" style={animatedBackdropStyle}>
+          <WebView
+            source={{
+              uri: buildPdfViewerUrl(
+                transitionBackdrop.uri,
+                Number(backFile?.page || 1),
+                "transition"
+              ),
+            }}
+            style={styles.media}
+            javaScriptEnabled
+            domStorageEnabled
+            scrollEnabled={false}
+            mixedContentMode="always"
+          />
+        </Animated.View>
+      );
+    }
+
+    return (
+      <Animated.View pointerEvents="none" style={animatedBackdropStyle}>
+        <Image
+          source={{ uri: transitionBackdrop.uri }}
+          style={styles.media}
+          resizeMode="stretch"
+          fadeDuration={0}
+        />
+      </Animated.View>
+    );
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -1232,13 +1869,22 @@ export default function SlideRenderer({
 
   useEffect(() => {
     if (typeof onPlaybackChange !== "function") return;
+    const section = sectionIndex + 1;
+    const sectionSlideMs = getSlideDurationMs();
+
     if (sourceType !== SOURCE_TYPES.multimedia) {
       onPlaybackChange({
-        section: sectionIndex + 1,
+        section,
         sourceType,
         title: sourceUrl || "URL Source",
         uri,
         cacheStatus: "Live",
+        itemIndex: 1,
+        totalItems: 1,
+        itemElapsedMs: 0,
+        itemDurationMs: 0,
+        playlistElapsedMs: 0,
+        playlistTotalMs: 0,
       });
       return;
     }
@@ -1246,12 +1892,18 @@ export default function SlideRenderer({
     if (!files.length) {
       const offline = !server;
       onPlaybackChange({
-        section: sectionIndex + 1,
+        section,
         sourceType: "multimedia",
         title: offline ? "Offline - no cached media" : "No media uploaded",
         mediaType: "",
         uri: "",
         cacheStatus: offline ? "Offline" : "Empty",
+        itemIndex: 0,
+        totalItems: 0,
+        itemElapsedMs: 0,
+        itemDurationMs: 0,
+        playlistElapsedMs: 0,
+        playlistTotalMs: 0,
       });
       return;
     }
@@ -1259,27 +1911,67 @@ export default function SlideRenderer({
     const active = files[index];
     if (!active) return;
     const localPlayableUri = normalizeMediaUri(String(active?.remoteUrl || ""));
-    const hasLocalPlayableUri = /^file:\/\//i.test(localPlayableUri);
-    const hasLocalFile = !!String(active?.localPath || "").trim();
     const isCached = /^file:\/\//i.test(uri);
-    const isMarkedCached = isCached || hasLocalFile || hasLocalPlayableUri;
+    const allFilesCached = files.every((entry) => {
+      const pathKey = String(entry?.url || "");
+      const progress = pathKey ? Number(cacheProgressByPath[pathKey] || 0) : 0;
+      const hasLocalPath = !!String(entry?.localPath || "").trim();
+      const entryHasLocalUri = /^file:\/\//i.test(String(entry?.remoteUrl || ""));
+      return hasLocalPath || entryHasLocalUri || progress >= 100;
+    });
     const cacheStatus = !uri
       ? ""
-      : isMarkedCached
+      : isCached || allFilesCached
       ? "Cached"
       : server
       ? "Streaming"
       : "Offline";
+    const isVideo = isVideoFile(active);
+    const itemDurationMs = Math.max(
+      0,
+      Math.round(
+        isVideo
+          ? videoProgressRef.current.durationMs || getEstimatedItemDurationMs(active, sectionSlideMs)
+          : getEstimatedItemDurationMs(active, sectionSlideMs)
+      )
+    );
+    const itemElapsedMs = Math.max(
+      0,
+      Math.min(
+        itemDurationMs || Number.MAX_SAFE_INTEGER,
+        Math.round(
+          isVideo
+            ? videoProgressRef.current.positionMs || resumePositionMs || 0
+            : Date.now() - lastIndexChangeAtRef.current
+        )
+      )
+    );
+    const playlistTotalMs = files.reduce(
+      (sum, entry) => sum + getEstimatedItemDurationMs(entry, sectionSlideMs),
+      0
+    );
+    const playlistElapsedMs =
+      files
+        .slice(0, index)
+        .reduce((sum, entry) => sum + getEstimatedItemDurationMs(entry, sectionSlideMs), 0) +
+      itemElapsedMs;
     onPlaybackChange({
-      section: sectionIndex + 1,
+      section,
       sourceType: "multimedia",
-      title: active.originalName || active.name || "Unknown media",
-      mediaType: active.type || "",
+      title: active?.originalName || active?.name || "Unknown media",
+      mediaType: active?.type || "",
       uri,
-      page: active.page || 0,
+      page: active?.page || 0,
       cacheStatus,
+      itemIndex: index + 1,
+      totalItems: files.length,
+      itemElapsedMs,
+      itemDurationMs,
+      playlistElapsedMs,
+      playlistTotalMs,
+      progressOnly: isVideo,
     });
-  }, [files, index, sectionIndex, sourceType, sourceUrl, uri, onPlaybackChange]);
+  }, [files, index, sectionIndex, sourceType, sourceUrl, uri, onPlaybackChange, resumePositionMs, playbackClock, server, cacheProgressByPath]);
 
   useEffect(() => {
     const resetPdfState = () => {
@@ -1465,7 +2157,7 @@ export default function SlideRenderer({
     );
   }
 
-  if (!uri) {
+  if (!uri && !emergencyVideoUri) {
     if (holdLargeVideo) {
       return (
         <View style={styles.downloadHoldWrap}>
@@ -1480,10 +2172,28 @@ export default function SlideRenderer({
     return <View style={styles.container} />;
   }
   const file = currentFile;
+  if (!file) {
+    return <View style={styles.container} />;
+  }
   const fileType = String(file?.type || "").toLowerCase();
   const isVideo = isVideoFile(file);
-  const isText = fileType === "text" || /\.txt$/i.test(file.originalName || file.name || "");
-  const isPdf = fileType === "pdf" || /\.pdf$/i.test(file.originalName || file.name || "");
+  const isText =
+    fileType === "text" || /\.txt$/i.test(file?.originalName || file?.name || "");
+  const isPdf =
+    fileType === "pdf" || /\.pdf$/i.test(file?.originalName || file?.name || "");
+  const slideImageTrackEnabled =
+    !isVideo &&
+    !isText &&
+    !isPdf &&
+    transitionAnimationType === "slide" &&
+    !sectionHasVideo &&
+    files.length > 1;
+  const activeImageSlot = imageVisibleSlot;
+  const nextImageSlot: "a" | "b" = activeImageSlot === "a" ? "b" : "a";
+  const activeImageUri = imageSlotUrls[activeImageSlot];
+  const nextImageUri = imageSlotUrls[nextImageSlot];
+  const outerTranslateX = slideImageTrackEnabled ? 0 : translateX;
+  const outerTranslateY = slideImageTrackEnabled ? 0 : translateY;
   const pdfPage = Number(file?.page || 1);
   const uploadTotal = Number(processingCount?.total || 0);
   const uploadDone = Number(processingCount?.uploaded || 0);
@@ -1491,7 +2201,13 @@ export default function SlideRenderer({
     !!String(processingMessage || "").trim() || (uploadTotal > 0 && uploadDone >= 0);
   const isCached = /^file:\/\//i.test(uri);
   const hasLocalFile = !!String(file?.localPath || "").trim();
-  const isMarkedCached = isCached || hasLocalFile || /^file:\/\//i.test(String(file?.remoteUrl || ""));
+  const currentPathKey = String(file?.url || "");
+  const currentCacheProgress = currentPathKey ? Number(cacheProgressByPath[currentPathKey] || 0) : 0;
+  const isMarkedCached =
+    isCached ||
+    hasLocalFile ||
+    /^file:\/\//i.test(String(file?.remoteUrl || "")) ||
+    currentCacheProgress >= 100;
   const totalFiles = files.length;
   const cachedCount = totalFiles
     ? files.reduce((count, entry) => {
@@ -1518,7 +2234,7 @@ export default function SlideRenderer({
     ? ""
     : sourceType !== SOURCE_TYPES.multimedia
     ? "Live"
-    : cachedCount > 0 && cachedCount >= totalFiles
+    : isCached || (cachedCount > 0 && cachedCount >= totalFiles)
     ? "Cached"
     : server
     ? "Streaming"
@@ -1537,6 +2253,7 @@ export default function SlideRenderer({
   const effectiveVideoUri =
     isVideo
       ? uri ||
+        emergencyVideoUri ||
         normalizeMediaUri(String(file?.remoteUrl || "")) ||
         (server && file?.url
           ? buildRemoteMediaUri(server, file.url, file?.mtimeMs || mediaVersion)
@@ -1544,62 +2261,73 @@ export default function SlideRenderer({
       : "";
 
   return (
-    <Animated.View
-      style={[
-        styles.container,
-        {
-          opacity,
-          transform: [
-            { perspective: 1000 },
-            { translateX },
-            { translateY },
-            { scale },
-            {
-              rotateY: rotateY.interpolate({
-                inputRange: [-180, 180],
-                outputRange: ["-180deg", "180deg"],
-              }),
-            },
-          ],
-        },
-      ]}
+    <View
+      style={styles.container}
+      onLayout={(event) => {
+        const width = Math.max(1, Math.round(Number(event?.nativeEvent?.layout?.width || 0)));
+        const height = Math.max(1, Math.round(Number(event?.nativeEvent?.layout?.height || 0)));
+        setContainerLayout((prev) =>
+          prev.width === width && prev.height === height ? prev : { width, height }
+        );
+      }}
     >
-      {showCacheBadge ? (
-        <View
-          style={[
-            styles.cacheBadge,
-            cacheStatus === "Offline" ? styles.cacheBadgeOffline : null,
-            cacheStatus === "Cached" ? styles.cacheBadgeCached : null,
-          ]}
-        >
-          {cacheStatus === "Streaming" && showCacheProgress ? (
-            <View
-              style={[
-                styles.cacheBadgeProgress,
-                { width: `${Math.round(aggregateProgress)}%` },
-              ]}
-            />
-          ) : null}
-          <View style={styles.cacheBadgeContent}>
-            {cacheStatus === "Cached" ? (
-              <Animated.View
+      {renderTransitionBackdrop()}
+      <Animated.View
+        style={[
+          styles.fillLayer,
+          {
+            opacity,
+            transform: [
+              { perspective: 1000 },
+              { translateX: outerTranslateX },
+              { translateY: outerTranslateY },
+              { scale },
+              {
+                rotateY: rotateY.interpolate({
+                  inputRange: [-180, 180],
+                  outputRange: ["-180deg", "180deg"],
+                }),
+              },
+            ],
+          },
+        ]}
+      >
+        {showCacheBadge ? (
+          <View
+            style={[
+              styles.cacheBadge,
+              cacheStatus === "Offline" ? styles.cacheBadgeOffline : null,
+              cacheStatus === "Cached" ? styles.cacheBadgeCached : null,
+            ]}
+          >
+            {cacheStatus === "Streaming" && showCacheProgress ? (
+              <View
                 style={[
-                  styles.cacheDot,
-                  isCached ? styles.cacheDotGreen : styles.cacheDotBlue,
-                  { opacity: livePulse },
+                  styles.cacheBadgeProgress,
+                  { width: `${Math.round(aggregateProgress)}%` },
                 ]}
               />
-            ) : (
-              <Text style={styles.cacheBadgeText}>
-                {cacheStatus === "Streaming" && totalFiles
-                  ? `Streaming ${cachedCount}/${totalFiles}`
-                  : cacheStatus}
-              </Text>
-            )}
+            ) : null}
+            <View style={styles.cacheBadgeContent}>
+              {cacheStatus === "Cached" ? (
+                <Animated.View
+                  style={[
+                    styles.cacheDot,
+                    isMarkedCached || isListFullyCached ? styles.cacheDotGreen : styles.cacheDotBlue,
+                    { opacity: livePulse },
+                  ]}
+                />
+              ) : (
+                <Text style={styles.cacheBadgeText}>
+                  {cacheStatus === "Streaming" && totalFiles
+                    ? `Streaming ${cachedCount}/${totalFiles}`
+                    : cacheStatus}
+                </Text>
+              )}
+            </View>
           </View>
-        </View>
-      ) : null}
-      {showProcessingOverlay ? (
+        ) : null}
+        {showProcessingOverlay ? (
         <View style={styles.processingWrap}>
           <ActivityIndicator size="large" color="#7fffd4" />
           <Text style={styles.processingTitle}>Updating Section</Text>
@@ -1617,21 +2345,28 @@ export default function SlideRenderer({
             </Text>
           ) : null}
         </View>
-      ) : isVideo ? (
+        ) : isVideo ? (
         <View style={mediaRotateLayerStyle}>
-          <Animated.View style={[styles.media, { opacity: videoFade }]}>
+          <Animated.View style={[styles.media, styles.videoSurface, { opacity: videoFade }]}>
             <NativeVideoPlayer
-              key={`${file.name}-${index}-${videoReloadToken}-${String(videoViewType)}`}
+              key={`video-player-${videoReloadToken}-${String(videoViewType)}`}
               src={effectiveVideoUri}
               style={styles.media}
               rotation={0}
               muted
+              startPositionMs={resumePositionMs}
               resizeMode="stretch"
               repeat={files.length === 1 && !forceLocalRestart}
               onEnd={() => {
+                videoProgressRef.current = { positionMs: 0, durationMs: 0 };
+                setResumePositionMs(0);
+                clearSavedPlaybackPosition(file).catch(() => {
+                  // ignore
+                });
                 if (forceLocalRestart) {
                   const localPlayableUri = normalizeMediaUri(String(file?.remoteUrl || ""));
                   if (/^file:\/\//i.test(localPlayableUri)) {
+                    prepareVideoReloadFromCurrentPosition();
                     pinnedMediaUriRef.current = {
                       identity: getMediaIdentity(file),
                       uri: localPlayableUri,
@@ -1652,13 +2387,10 @@ export default function SlideRenderer({
                     const hasLocalUri = /^file:\/\//i.test(String(nextFile?.remoteUrl || ""));
                     const hasLocal = hasLocalPath || hasLocalUri || progress >= 100;
                     if (!hasLocal && progress < 5 && videoGateLoopRef.current < 2) {
-                      // Keep current video for up to two extra loops to avoid blank/black while next buffers.
                       videoGateLoopRef.current += 1;
-                      setVideoReloadToken((prev) => prev + 1);
-                      return;
                     }
                   }
-                  goNext();
+                  queuePlaylistAdvance(file);
                 }
               }}
               onReady={() => {
@@ -1681,10 +2413,71 @@ export default function SlideRenderer({
                 }
                 Animated.timing(videoFade, {
                   toValue: 1,
-                  duration: 140,
+                  duration: files.length > 1 ? 180 : 0,
                   easing: Easing.out(Easing.cubic),
                   useNativeDriver: true,
                 }).start();
+              }}
+              onProgress={(event) => {
+                const positionMs = Math.max(
+                  0,
+                  Math.round(Number(event?.nativeEvent?.positionMs || 0))
+                );
+                const durationMs = Math.max(
+                  0,
+                  Math.round(Number(event?.nativeEvent?.durationMs || 0))
+                );
+                if (positionMs > lastObservedVideoPositionRef.current + 400) {
+                  lastObservedVideoPositionRef.current = positionMs;
+                  lastObservedVideoProgressAtRef.current = Date.now();
+                }
+                const identity = getMediaStableIdentity(file);
+                const lastStablePosition = Math.max(
+                  0,
+                  Math.round(Number(lastStableVideoProgressRef.current[identity] || 0))
+                );
+                const likelyUnexpectedRestart =
+                  files.length > 1 &&
+                  lastStablePosition > 5000 &&
+                  positionMs < 1500 &&
+                  lastStablePosition - positionMs > 3000 &&
+                  durationMs > Math.max(8000, lastStablePosition + 2000);
+                if (likelyUnexpectedRestart) {
+                  const recovered = recoverUnexpectedVideoRestart(
+                    file,
+                    Math.max(0, lastStablePosition - 600)
+                  );
+                  if (recovered) {
+                    return;
+                  }
+                }
+                videoProgressRef.current = { positionMs, durationMs };
+                if (positionMs >= lastStablePosition || lastStablePosition - positionMs < 1200) {
+                  lastStableVideoProgressRef.current[identity] = positionMs;
+                }
+                if (durationMs > 1000) {
+                  const durationIdentity = getMediaContentIdentity(file);
+                  if (durationByIdentityRef.current[durationIdentity] !== durationMs) {
+                    durationByIdentityRef.current = {
+                      ...durationByIdentityRef.current,
+                      [durationIdentity]: durationMs,
+                    };
+                    persistDurationMap().catch(() => {
+                      // ignore persistence errors
+                    });
+                  }
+                }
+                setPlaybackClock((prev) => prev + 1);
+                savePlaybackProgress(file, positionMs, durationMs).catch(() => {
+                  // ignore persistence errors
+                });
+                if (
+                  files.length > 1 &&
+                  durationMs > 1500 &&
+                  positionMs >= Math.max(0, durationMs - 500)
+                ) {
+                  queuePlaylistAdvance(file);
+                }
               }}
               onBuffering={(event) => {
                 const buffering = !!event?.nativeEvent?.buffering;
@@ -1692,9 +2485,8 @@ export default function SlideRenderer({
                 const hasLocalPlayable = /^file:\/\//i.test(localUri) || /^file:\/\//i.test(uri);
                 if (hasLocalPlayable) {
                   if (buffering && /^https?:\/\//i.test(String(uri || "")) && /^file:\/\//i.test(localUri)) {
-                    // If cached file exists, switch to local immediately to avoid buffering.
-                    setUri(localUri);
-                    setVideoReloadToken((prev) => prev + 1);
+                    // Never swap the active source during buffering. Use cached/local on next load only.
+                    setForceLocalRestart(false);
                   }
                   setVideoBuffering(false);
                   setShowBufferIndicator(false);
@@ -1735,7 +2527,7 @@ export default function SlideRenderer({
             </View>
           ) : null}
         </View>
-      ) : isPdf ? (
+        ) : isPdf ? (
         <View style={mediaRotateLayerStyle}>
           {pdfSlotUrls.a ? (
             <WebView
@@ -1776,7 +2568,7 @@ export default function SlideRenderer({
             />
           ) : null}
         </View>
-      ) : isText ? (
+        ) : isText ? (
         <View style={[mediaRotateLayerStyle, styles.textWrap]}>
           <ScrollView
             style={styles.media}
@@ -1788,7 +2580,61 @@ export default function SlideRenderer({
             </Text>
           </ScrollView>
         </View>
-      ) : (
+        ) : slideImageTrackEnabled && activeImageUri && nextImageUri ? (
+        <View style={mediaRotateLayerStyle}>
+          <Animated.View
+            style={[
+              styles.imageTrack,
+              {
+                transform: [
+                  {
+                    translateX:
+                      transitionDirection === "left" || transitionDirection === "right"
+                        ? backdropTranslateX
+                        : 0,
+                  },
+                  {
+                    translateY:
+                      transitionDirection === "top" || transitionDirection === "bottom"
+                        ? backdropTranslateY
+                        : 0,
+                  },
+                ],
+              },
+            ]}
+          >
+            <Image
+              source={{ uri: activeImageUri }}
+              style={[
+                styles.media,
+                styles.imageTrackItem,
+                styles.imageTrackCurrent,
+              ]}
+              resizeMode="stretch"
+              fadeDuration={0}
+              onError={handleRenderError}
+            />
+            <Image
+              source={{ uri: nextImageUri }}
+              style={[
+                styles.media,
+                styles.imageTrackItem,
+                transitionDirection === "left"
+                  ? { left: slideDistanceX }
+                  : transitionDirection === "right"
+                  ? { left: -slideDistanceX }
+                  : transitionDirection === "top"
+                  ? { top: slideDistanceY }
+                  : { top: -slideDistanceY },
+              ]}
+              resizeMode="stretch"
+              fadeDuration={0}
+              onLoad={() => handleImageLoadEnd(nextImageSlot)}
+              onError={handleRenderError}
+            />
+          </Animated.View>
+        </View>
+        ) : (
         <View style={mediaRotateLayerStyle}>
           {imageSlotUrls.a ? (
             <Image
@@ -1819,14 +2665,16 @@ export default function SlideRenderer({
             />
           ) : null}
         </View>
-      )}
-    </Animated.View>
+        )}
+      </Animated.View>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#ffffff", overflow: "hidden" },
   media: { width: "100%", height: "100%", backgroundColor: "#ffffff" },
+  videoSurface: { backgroundColor: "#000000" },
   absoluteLayer: { position: "absolute" },
   fillLayer: {
     position: "absolute",
@@ -1941,6 +2789,26 @@ const styles = StyleSheet.create({
   imageHidden: {
     opacity: 0,
   },
+  imageTrack: {
+    position: "absolute",
+    left: 0,
+    top: 0,
+    right: 0,
+    bottom: 0,
+  },
+  imageTrackItem: {
+    position: "absolute",
+    left: 0,
+    top: 0,
+    width: "100%",
+    height: "100%",
+  },
+  imageTrackCurrent: {
+    zIndex: 1,
+  },
+  transitionBackdrop: {
+    zIndex: 0,
+  },
   cacheBadge: {
     position: "absolute",
     top: 6,
@@ -1968,6 +2836,11 @@ const styles = StyleSheet.create({
     borderWidth: 0,
     paddingHorizontal: 0,
     paddingVertical: 0,
+    width: 11,
+    height: 11,
+    borderRadius: 999,
+    alignItems: "center",
+    justifyContent: "center",
     shadowOpacity: 0,
     shadowRadius: 0,
     elevation: 0,
@@ -1982,6 +2855,10 @@ const styles = StyleSheet.create({
   cacheBadgeContent: {
     position: "relative",
     zIndex: 2,
+    width: "100%",
+    height: "100%",
+    alignItems: "center",
+    justifyContent: "center",
   },
   cacheBadgeText: {
     color: "rgba(233, 246, 255, 0.95)",
@@ -1991,10 +2868,12 @@ const styles = StyleSheet.create({
     textTransform: "uppercase",
   },
   cacheDot: {
-    width: 3,
-    height: 3,
-    borderRadius: 1.5,
-    marginVertical: 1,
+    width: 5,
+    height: 5,
+    borderRadius: 2.5,
+    marginVertical: 0,
+    marginLeft: 0,
+    marginRight: 0,
     alignSelf: "center",
   },
   cacheDotBlue: {
