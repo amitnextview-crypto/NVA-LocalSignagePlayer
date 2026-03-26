@@ -10,6 +10,7 @@ import {
   subscribeCacheProgress,
   setDownloadConcurrencyOverride,
   prefetchMediaItems,
+  isMediaCacheEligible,
 } from "../services/mediaService";
 import { getServer } from "../services/serverService";
 import { buildPlaybackResumeKey, getPlaylistAdvanceState } from "./videoPlaybackState";
@@ -139,6 +140,10 @@ function getMediaCacheIdentity(item: any) {
     String(item?.localPath || ""),
     String(item?.remoteUrl || ""),
   ].join("|");
+}
+
+function isCacheEligible(item: any) {
+  return !!item && isMediaCacheEligible(item);
 }
 
 function buildListSignature(list: any[]) {
@@ -790,30 +795,6 @@ export default function SlideRenderer({
 
   useEffect(() => {
     if (sourceType !== SOURCE_TYPES.multimedia) return;
-    if (!isMountedRef.current) return;
-    let timer: ReturnType<typeof setInterval> | null = null;
-
-    const refresh = async () => {
-      try {
-        const list = await getMediaFiles(sectionIndex);
-        if (!isMountedRef.current) return;
-        if (Array.isArray(list) && list.length) {
-          setFiles((prev) => (areMediaListsEqual(prev, list) ? prev : list));
-          setIndex(findMatchingIndex(list, filesRef.current[indexRef.current], indexRef.current));
-        }
-      } catch (_e) {
-        // ignore
-      }
-    };
-
-    timer = setInterval(refresh, 9000);
-    return () => {
-      if (timer) clearInterval(timer);
-    };
-  }, [sectionIndex, sourceType]);
-
-  useEffect(() => {
-    if (sourceType !== SOURCE_TYPES.multimedia) return;
     if (!files.length) return;
     videoRetryCountRef.current = 0;
     setVideoReloadToken(0);
@@ -1337,33 +1318,6 @@ export default function SlideRenderer({
       }
     };
   }, [files, index, uri, sourceType, videoFade]);
-
-  useEffect(() => {
-    if (sourceType !== SOURCE_TYPES.multimedia) return;
-    if (!files.length) return;
-    const file = files[index];
-    if (!isVideoFile(file)) return;
-    const timer = setInterval(() => {
-      if (!isMountedRef.current) return;
-      if (videoBuffering) return;
-      const durationMs = Math.max(0, Math.round(videoProgressRef.current.durationMs || 0));
-      const positionMs = Math.max(0, Math.round(videoProgressRef.current.positionMs || 0));
-      if (durationMs <= 2000) return;
-      if (positionMs >= Math.max(0, durationMs - 1200)) return;
-      if (positionMs > lastObservedVideoPositionRef.current + 400) {
-        lastObservedVideoPositionRef.current = positionMs;
-        lastObservedVideoProgressAtRef.current = Date.now();
-        return;
-      }
-      const stalledForMs = Date.now() - Number(lastObservedVideoProgressAtRef.current || 0);
-      if (positionMs > 0 && stalledForMs > 12000) {
-        lastObservedVideoProgressAtRef.current = Date.now();
-        prepareVideoReloadFromCurrentPosition();
-        setVideoReloadToken((prev) => prev + 1);
-      }
-    }, 3000);
-    return () => clearInterval(timer);
-  }, [files, index, sourceType, videoBuffering]);
 
   useEffect(() => {
     const localSectionHasVideo = files.some((entry) => isVideoFile(entry));
@@ -1912,7 +1866,10 @@ export default function SlideRenderer({
     if (!active) return;
     const localPlayableUri = normalizeMediaUri(String(active?.remoteUrl || ""));
     const isCached = /^file:\/\//i.test(uri);
-    const allFilesCached = files.every((entry) => {
+    const cacheEligibleFiles = files.filter((entry) => isCacheEligible(entry));
+    const allFilesCached =
+      cacheEligibleFiles.length > 0 &&
+      cacheEligibleFiles.every((entry) => {
       const pathKey = String(entry?.url || "");
       const progress = pathKey ? Number(cacheProgressByPath[pathKey] || 0) : 0;
       const hasLocalPath = !!String(entry?.localPath || "").trim();
@@ -2209,8 +2166,10 @@ export default function SlideRenderer({
     /^file:\/\//i.test(String(file?.remoteUrl || "")) ||
     currentCacheProgress >= 100;
   const totalFiles = files.length;
-  const cachedCount = totalFiles
-    ? files.reduce((count, entry) => {
+  const cacheEligibleFiles = files.filter((entry) => isCacheEligible(entry));
+  const cacheEligibleTotal = cacheEligibleFiles.length;
+  const cachedCount = cacheEligibleTotal
+    ? cacheEligibleFiles.reduce((count, entry) => {
         const pathKey = String(entry?.url || "");
         const progress = pathKey ? Number(cacheProgressByPath[pathKey] || 0) : 0;
         const hasLocalPath = !!String(entry?.localPath || "").trim();
@@ -2219,27 +2178,27 @@ export default function SlideRenderer({
         return cached ? count + 1 : count;
       }, 0)
     : 0;
-  const streamingCount = Math.max(0, totalFiles - cachedCount);
-  const aggregateProgress = totalFiles
-    ? files.reduce((sum, entry) => {
+  const streamingCount = Math.max(0, cacheEligibleTotal - cachedCount);
+  const aggregateProgress = cacheEligibleTotal
+    ? cacheEligibleFiles.reduce((sum, entry) => {
         const pathKey = String(entry?.url || "");
         const progress = pathKey ? Number(cacheProgressByPath[pathKey] || 0) : 0;
         const hasLocalPath = !!String(entry?.localPath || "").trim();
         const hasLocalUri = /^file:\/\//i.test(String(entry?.remoteUrl || ""));
         const cached = hasLocalPath || hasLocalUri || progress >= 100;
         return sum + (cached ? 100 : Math.max(0, Math.min(100, progress)));
-      }, 0) / totalFiles
+      }, 0) / cacheEligibleTotal
     : 0;
   const cacheStatus = !uri
     ? ""
     : sourceType !== SOURCE_TYPES.multimedia
     ? "Live"
-    : isCached || (cachedCount > 0 && cachedCount >= totalFiles)
+    : isCached || (cacheEligibleTotal > 0 && cachedCount >= cacheEligibleTotal)
     ? "Cached"
     : server
     ? "Streaming"
     : "Offline";
-  const isListFullyCached = totalFiles > 0 && cachedCount >= totalFiles;
+  const isListFullyCached = cacheEligibleTotal > 0 && cachedCount >= cacheEligibleTotal;
   const showCacheBadge = sourceType === SOURCE_TYPES.multimedia && !!cacheStatus;
   const showCacheProgress =
     cacheStatus === "Streaming" && streamingCount > 0 && aggregateProgress > 0 && aggregateProgress < 100;
@@ -2319,8 +2278,8 @@ export default function SlideRenderer({
                 />
               ) : (
                 <Text style={styles.cacheBadgeText}>
-                  {cacheStatus === "Streaming" && totalFiles
-                    ? `Streaming ${cachedCount}/${totalFiles}`
+                  {cacheStatus === "Streaming" && cacheEligibleTotal
+                    ? `Streaming ${cachedCount}/${cacheEligibleTotal}`
                     : cacheStatus}
                 </Text>
               )}
@@ -2353,7 +2312,7 @@ export default function SlideRenderer({
               src={effectiveVideoUri}
               style={styles.media}
               rotation={0}
-              muted
+              muted={false}
               startPositionMs={resumePositionMs}
               resizeMode="stretch"
               repeat={files.length === 1 && !forceLocalRestart}
@@ -2672,8 +2631,8 @@ export default function SlideRenderer({
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#ffffff", overflow: "hidden" },
-  media: { width: "100%", height: "100%", backgroundColor: "#ffffff" },
+  container: { flex: 1, backgroundColor: "#000000", overflow: "hidden" },
+  media: { width: "100%", height: "100%", backgroundColor: "#000000" },
   videoSurface: { backgroundColor: "#000000" },
   absoluteLayer: { position: "absolute" },
   fillLayer: {

@@ -11,13 +11,15 @@ const LIST_CACHE_PATH = `${MEDIA_DIR}/list-cache.json`;
 const MEDIA_FETCH_TIMEOUT_MS = 2500;
 const MEDIA_FETCH_BACKOFF_BASE_MS = 1500;
 const MEDIA_FETCH_BACKOFF_MAX_MS = 30000;
-const DOWNLOAD_CONCURRENCY = 8;
+const DOWNLOAD_CONCURRENCY = 4;
 const LARGE_MEDIA_BYTES = 300 * 1024 * 1024;
 const LARGE_MEDIA_CONCURRENCY = 1;
 const LIST_REFRESH_MIN_INTERVAL_MS = 3000;
 const SMALL_FILE_AWAIT_BYTES = 5 * 1024 * 1024;
-const DOWNLOAD_MAX_RETRIES = 3;
-const DOWNLOAD_RETRY_DELAY_MS = 1200;
+const DOWNLOAD_MAX_RETRIES = 5;
+const DOWNLOAD_RETRY_DELAY_MS = 1500;
+const DOWNLOAD_CONNECTION_TIMEOUT_MS = 20000;
+const DOWNLOAD_READ_TIMEOUT_MS = 120000;
 const DEFAULT_MIN_FREE_BYTES = 500 * 1024 * 1024;
 const VIDEO_FILE_RE = /\.(mp4|m4v|mov|mkv|webm)(\?.*)?$/i;
 const VIDEO_DOWNLOAD_CONCURRENCY = 1;
@@ -349,6 +351,10 @@ function shouldCacheItem(item: MediaItem): boolean {
   return true;
 }
 
+export function isMediaCacheEligible(item: MediaItem): boolean {
+  return shouldCacheItem(item);
+}
+
 function isVideoItem(item: MediaItem): boolean {
   const mime = String(item?.type || "").toLowerCase();
   if (mime.startsWith("video/")) return true;
@@ -462,17 +468,18 @@ async function downloadIfNeeded(
             throw new Error("download-hash-mismatch");
           }
         }
-        manifest[remotePath] = {
-          url: remotePath,
-          localPath: targetPath,
-          size: expectedSize || size,
-          mtimeMs: expectedMtime,
-          hash: expectedHash || undefined,
-          lastSeenAt: Date.now(),
-        };
-        emitProgress(remotePath, {
-          total: expectedSize || size || 0,
-          received: expectedSize || size || 0,
+      manifest[remotePath] = {
+        url: remotePath,
+        localPath: targetPath,
+        size: expectedSize || size,
+        mtimeMs: expectedMtime,
+        hash: expectedHash || undefined,
+        lastSeenAt: Date.now(),
+      };
+      await writeManifest(manifest);
+      emitProgress(remotePath, {
+        total: expectedSize || size || 0,
+        received: expectedSize || size || 0,
           percent: 100,
           updatedAt: Date.now(),
         });
@@ -485,11 +492,20 @@ async function downloadIfNeeded(
   }
   for (let attempt = 0; attempt < DOWNLOAD_MAX_RETRIES; attempt += 1) {
     try {
+      try {
+        if (await fileExists(targetPath)) {
+          await RNFS.unlink(targetPath);
+        }
+      } catch {
+        // clean partial files before retrying
+      }
       const download = RNFS.downloadFile({
         fromUrl: `${remoteUrl}?ts=${Date.now()}`,
         toFile: targetPath,
-        background: true,
+        background: false,
         discretionary: false,
+        connectionTimeout: DOWNLOAD_CONNECTION_TIMEOUT_MS,
+        readTimeout: DOWNLOAD_READ_TIMEOUT_MS,
         progressInterval: 500,
         progress: (data) => {
           const total = Number(data?.contentLength || 0);
@@ -530,6 +546,7 @@ async function downloadIfNeeded(
         hash: expectedHash || undefined,
         lastSeenAt: Date.now(),
       };
+      await writeManifest(manifest);
       emitProgress(remotePath, {
         total: expectedSize || finalSize || 0,
         received: expectedSize || finalSize || 0,
@@ -539,6 +556,13 @@ async function downloadIfNeeded(
       invalidateCacheSummary();
       return targetPath;
     } catch {
+      try {
+        if (await fileExists(targetPath)) {
+          await RNFS.unlink(targetPath);
+        }
+      } catch {
+        // ignore cleanup errors
+      }
       if (attempt < DOWNLOAD_MAX_RETRIES - 1) {
         await new Promise<void>((resolve) => setTimeout(() => resolve(), DOWNLOAD_RETRY_DELAY_MS));
       }

@@ -10,6 +10,7 @@ import android.content.pm.PackageManager;
 import android.net.ConnectivityManager;
 import android.net.Network;
 import android.net.NetworkCapabilities;
+import android.net.Uri;
 import android.net.wifi.WifiManager;
 import android.os.Build;
 import android.os.StatFs;
@@ -89,6 +90,33 @@ public class DeviceIdModule extends ReactContextBaseJavaModule {
         }
 
         return out;
+    }
+
+    @ReactMethod(isBlockingSynchronousMethod = true)
+    public boolean canDrawOverlays() {
+        try {
+            Context context = reactContext.getApplicationContext();
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
+                return true;
+            }
+            return Settings.canDrawOverlays(context);
+        } catch (Exception ignored) {
+            return false;
+        }
+    }
+
+    @ReactMethod
+    public void openOverlaySettings() {
+        try {
+            Context context = reactContext.getApplicationContext();
+            Intent intent = new Intent(
+                    Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                    Uri.parse("package:" + context.getPackageName())
+            );
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            context.startActivity(intent);
+        } catch (Exception ignored) {
+        }
     }
 
     @ReactMethod

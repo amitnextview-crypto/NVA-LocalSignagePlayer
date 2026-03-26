@@ -1,6 +1,7 @@
 package com.signageplayertv;
 
 import android.content.Context;
+import android.graphics.Color;
 import android.net.Uri;
 import android.os.Handler;
 import android.os.Looper;
@@ -86,6 +87,7 @@ public class NativeVideoPlayerView extends FrameLayout implements LifecycleEvent
         ));
         this.playerView.setKeepScreenOn(true);
         this.playerView.setKeepContentOnPlayerReset(true);
+        this.playerView.setShutterBackgroundColor(Color.TRANSPARENT);
         applyResizeMode();
         applyRotation();
         reactContext.addLifecycleEventListener(this);
@@ -242,10 +244,10 @@ public class NativeVideoPlayerView extends FrameLayout implements LifecycleEvent
 
         DefaultLoadControl loadControl = new DefaultLoadControl.Builder()
                 .setBufferDurationsMs(
-                        20000,
-                        180000,
-                        1000,
-                        2500
+                        4000,
+                        30000,
+                        750,
+                        1500
                 )
                 .setTargetBufferBytes(C.LENGTH_UNSET)
                 .setPrioritizeTimeOverSizeThresholds(true)

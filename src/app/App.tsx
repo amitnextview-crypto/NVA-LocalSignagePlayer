@@ -179,6 +179,7 @@ export default function App() {
   const pendingApkUpdateSuccessRef = useRef<any | null>(null);
   const errorClearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const offlineNoticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const offlineNoticeRef = useRef("");
   const lastPlaybackHealthEmitAtRef = useRef(0);
   const networkQualityRef = useRef("unknown");
   const playbackStatsRef = useRef({
@@ -205,6 +206,10 @@ export default function App() {
     configBytes: 0,
     cacheBytes: 0,
   });
+
+  useEffect(() => {
+    offlineNoticeRef.current = offlineNotice;
+  }, [offlineNotice]);
 
   const pushDiagnosticEvent = (type: string, message: string) => {
     diagnosticEventsRef.current = [
@@ -770,7 +775,7 @@ export default function App() {
         const hasInternet = !!networkState?.internet;
         const connected = !!networkState?.connected;
         if (hasInternet || connected) {
-          if (offlineNotice) setOfflineNotice("");
+          if (offlineNoticeRef.current) setOfflineNotice("");
           return;
         }
 
@@ -815,7 +820,7 @@ export default function App() {
         const hasInternet = !!networkState?.internet;
         const connected = !!networkState?.connected;
         if (hasInternet || connected) {
-          if (offlineNotice) setOfflineNotice("");
+          if (offlineNoticeRef.current) setOfflineNotice("");
           return;
         }
         setOfflineNotice("Internet not connected. Running in offline mode.");
@@ -1191,6 +1196,9 @@ export default function App() {
         socketUrlRef.current = url;
 
         socket.on("connect", async () => {
+          if (offlineNoticeRef.current) {
+            setOfflineNotice("");
+          }
           reconnectMissCount = 0;
           pushDiagnosticEvent("socket", `Connected to ${url}`);
           console.log("Connected:", deviceId);
@@ -1333,16 +1341,16 @@ export default function App() {
           }
 
           if (status === "ready") {
-            setUploadProcessingBySection((prev) => {
-              const next = { ...prev };
-              delete next[section];
-              return next;
-            });
-            setUploadCountsBySection((prev) => {
-              const next = { ...prev };
-              delete next[section];
-              return next;
-            });
+            setUploadProcessingBySection((prev) => ({
+              ...prev,
+              [section]: "Applying new media on device... Please wait.",
+            }));
+            if (total > 0) {
+              setUploadCountsBySection((prev) => ({
+                ...prev,
+                [section]: { uploaded: total, total },
+              }));
+            }
             if (section >= 1 && section <= 3) {
               const existing = sectionRefreshTimersRef.current[section];
               if (existing) {
@@ -1374,9 +1382,22 @@ export default function App() {
                     setPlaylistSyncAt(Date.now());
                     setMediaVersion((prev) => prev + 1);
                   }
+                  setUploadProcessingBySection((prev) => {
+                    const next = { ...prev };
+                    delete next[section];
+                    return next;
+                  });
+                  setUploadCountsBySection((prev) => {
+                    const next = { ...prev };
+                    delete next[section];
+                    return next;
+                  });
                   await emitDeviceHealthSnapshot("section-upload-ready", { section }, { forceStorageScan: true });
                 } catch (_e) {
-                  // ignore refresh errors here
+                  setUploadProcessingBySection((prev) => ({
+                    ...prev,
+                    [section]: "New media received, but device refresh failed. Retrying on next sync.",
+                  }));
                 }
               }, 400);
             }

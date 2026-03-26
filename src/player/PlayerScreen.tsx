@@ -386,7 +386,7 @@ export default function PlayerScreen({
               style={{ width: "100%", height: "100%" }}
               resizeMode="cover"
               repeat
-              muted
+              muted={false}
               playInBackground={false}
               ignoreSilentSwitch="ignore"
               bufferingStrategy={BufferingStrategyType.DEPENDING_ON_MEMORY}
