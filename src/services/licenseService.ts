@@ -2,7 +2,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 
 const LICENSE_KEY_STORAGE_KEY = "license_key_v1";
 const LICENSE_DEVICE_STORAGE_KEY = "license_device_id_v1";
-const LICENSE_GENERATOR_BASE_URL = "https://nva-signageplayertv-licences-fmza.vercel.app/";
+const LICENSE_GENERATOR_BASE_URL = "https://local-signage-player-tv-admin-user.vercel.app"; // Set this to your license generator server URL
 const LICENSE_TIMEOUT_MS = 8000;
 
 function normalizeKey(value: string): string {

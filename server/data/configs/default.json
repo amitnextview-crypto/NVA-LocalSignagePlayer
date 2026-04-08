@@ -1,5 +1,5 @@
 {
-  "orientation": "horizontal",
+  "orientation": "vertical",
   "layout": "fullscreen",
   "grid3Layout": "stack-h",
   "gridRatio": "1:1",
