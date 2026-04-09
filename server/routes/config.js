@@ -100,7 +100,7 @@ const fallbackUpload = multer({
         .replace(/[^a-zA-Z0-9_-]/g, "_")
         .slice(0, 80);
       const ext = path.extname(file.originalname || "").toLowerCase();
-      const safeExt = [".jpg", ".jpeg", ".png", ".mp4", ".mkv", ".webm"].includes(ext)
+      const safeExt = [".jpg", ".jpeg", ".png", ".mp4", ".mov", ".mkv", ".webm"].includes(ext)
         ? ext
         : ".jpg";
       cb(null, `schedule-fallback-${target}${safeExt}`);
@@ -109,8 +109,8 @@ const fallbackUpload = multer({
   limits: { fileSize: 1024 * 1024 * 1024 },
   fileFilter: (_req, file, cb) => {
     const ext = path.extname(file.originalname || "").toLowerCase();
-    if (![".jpg", ".jpeg", ".png", ".mp4", ".mkv", ".webm"].includes(ext)) {
-      return cb(new Error("Only JPG/PNG/MP4/MKV/WEBM files are allowed"));
+    if (![".jpg", ".jpeg", ".png", ".mp4", ".mov", ".mkv", ".webm"].includes(ext)) {
+      return cb(new Error("Only JPG/PNG/MP4/MOV/MKV/WEBM files are allowed"));
     }
     cb(null, true);
   },

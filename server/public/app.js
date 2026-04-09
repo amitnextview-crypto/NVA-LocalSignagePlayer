@@ -1,5 +1,5 @@
-const SUPPORTED_FILE_EXT = /\.(mp4|mkv|webm|jpg|jpeg|png|txt|pdf|ppt|pptx|pptm|pps|ppsx|potx)$/i;
-const VIDEO_FILE_EXT = /\.(mp4|mkv|webm)$/i;
+const SUPPORTED_FILE_EXT = /\.(mp4|mov|mkv|webm|jpg|jpeg|png|txt|pdf|ppt|pptx|pptm|pps|ppsx|potx)$/i;
+const VIDEO_FILE_EXT = /\.(mp4|mov|mkv|webm)$/i;
 const PPT_FILE_EXT = /\.(ppt|pptx|pptm|pps|ppsx|potx)$/i;
 const PPTX_FILE_EXT = /\.(pptx|pptm|ppsx|potx)$/i;
 const PPT_LEGACY_EXT = /\.(ppt|pps)$/i;
@@ -1228,7 +1228,7 @@ function renderSectionSlot(slot, sectionNumber, config) {
   }
 
   const file = liveFile || files[state.index % files.length];
-  const isVideo = /\.(mp4|mkv|webm)$/i.test(file.name || "");
+  const isVideo = /\.(mp4|mov|mkv|webm)$/i.test(file.name || "");
   const isText = (file.type || "").toLowerCase() === "text" || /\.txt$/i.test(file.originalName || file.name || "");
   const isPdf = (file.type || "").toLowerCase() === "pdf" || /\.pdf$/i.test(file.originalName || file.name || "");
 

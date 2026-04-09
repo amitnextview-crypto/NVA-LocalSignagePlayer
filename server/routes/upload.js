@@ -16,6 +16,7 @@ const basePath = process.pkg
 const uploadsBase = path.join(basePath, "uploads");
 const ALLOWED_EXTENSIONS = new Set([
   ".mp4",
+  ".mov",
   ".mkv",
   ".webm",
   ".jpg",
@@ -32,6 +33,7 @@ const ALLOWED_EXTENSIONS = new Set([
 ]);
 const ALLOWED_MIME_TYPES = new Set([
   "video/mp4",
+  "video/mov",
   "video/webm",
   "video/x-matroska",
   "image/jpeg",
@@ -46,7 +48,7 @@ const ALLOWED_MIME_TYPES = new Set([
   "application/vnd.ms-powerpoint.slideshow.macroenabled.12",
   "application/vnd.openxmlformats-officedocument.presentationml.template",
 ]);
-const VIDEO_EXTENSIONS = new Set([".mp4", ".mkv", ".webm"]);
+const VIDEO_EXTENSIONS = new Set([".mp4", ".mov", ".mkv", ".webm"]);
 const PPT_EXTENSIONS = new Set([".ppt", ".pptx", ".pptm", ".pps", ".ppsx", ".potx"]);
 const PPT_MARKER_NAME = ".ppt_marker";
 const MAX_FILE_SIZE_BYTES = 5 * 1024 * 1024 * 1024; // 5 GB
@@ -141,6 +143,7 @@ function cleanDir(dirPath) {
 function extFromMime(mimeType) {
   const mime = String(mimeType || "").toLowerCase();
   if (mime === "video/mp4") return ".mp4";
+  if (mime === "video/mov") return ".mov";
   if (mime === "video/webm") return ".webm";
   if (mime === "video/x-matroska") return ".mkv";
   if (mime === "image/jpeg") return ".jpg";

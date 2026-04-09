@@ -8,7 +8,7 @@ const router = express.Router();
 const BASE_DIR = process.pkg
   ? path.join(global.runtimeBasePath || path.dirname(process.execPath), "uploads")
   : path.join(__dirname, "../uploads");
-const ALLOWED_MEDIA_EXT = /\.(mp4|mkv|webm|jpg|jpeg|png|txt|pdf)$/i;
+const ALLOWED_MEDIA_EXT = /\.(mp4|mov|mkv|webm|jpg|jpeg|png|txt|pdf)$/i;
 const HASH_CACHE = new Map();
 const SAFE_DEVICE_RE = /^[a-zA-Z0-9_-]{1,64}$/;
 

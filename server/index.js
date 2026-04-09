@@ -260,6 +260,26 @@ app.use(
         res.setHeader("Surrogate-Control", "no-store");
       }
 
+      if (filePath.endsWith(".mov")) {
+        res.setHeader("Content-Type", "video/mov");
+        res.setHeader("Accept-Ranges", "bytes");
+        // Avoid long-lived device cache growth for large media.
+        res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+        res.setHeader("Pragma", "no-cache");
+        res.setHeader("Expires", "0");
+        res.setHeader("Surrogate-Control", "no-store");
+      }
+
+      if (filePath.endsWith(".webm")) {
+        res.setHeader("Content-Type", "video/webm");
+        res.setHeader("Accept-Ranges", "bytes");
+        // Avoid long-lived device cache growth for large media.
+        res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+        res.setHeader("Pragma", "no-cache");
+        res.setHeader("Expires", "0");
+        res.setHeader("Surrogate-Control", "no-store");
+      }
+
       if (filePath.match(/\.(jpg|jpeg|png|pdf|txt)$/i)) {
         res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
         res.setHeader("Pragma", "no-cache");
