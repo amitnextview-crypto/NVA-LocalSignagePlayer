@@ -311,6 +311,26 @@ export default function App() {
     }
   }
 
+  async function clearNonEssentialStorage() {
+    try {
+      const preserveKeys = new Set([
+        "license_key_v1",
+        "license_device_id_v1",
+        "CMS_SERVER",
+        "CMS_SERVER_LAST_GOOD",
+        "device_name_v1",
+        "device_group_v1",
+      ]);
+      const keys = await AsyncStorage.getAllKeys();
+      const removableKeys = keys.filter((key) => !preserveKeys.has(String(key || "")));
+      if (removableKeys.length) {
+        await AsyncStorage.multiRemove(removableKeys);
+      }
+    } catch {
+      // ignore cleanup errors
+    }
+  }
+
   function resetRuntimePlaybackSnapshots() {
     playbackBySectionRef.current = {};
     playbackStatsRef.current = {
@@ -1113,8 +1133,15 @@ export default function App() {
           NativeDeviceModule.setAutoReopenEnabled(false);
         }
         resetRuntimePlaybackSnapshots();
+        await clearPersistedPlaybackState();
+        await clearNonEssentialStorage();
         await clearRuntimePlaybackData();
+        await clearRuntimeTransientCache();
         setSectionPlaybackTimeline({});
+        setUploadProcessingBySection({});
+        setUploadCountsBySection({});
+        setPlaylistSyncAt(0);
+        setContentResetVersion((prev) => prev + 1);
 
         console.log("Data cleared");
         await emitDeviceHealthSnapshot("clear-data", {}, { forceStorageScan: true });
@@ -1645,10 +1672,12 @@ export default function App() {
       <View style={styles.connectRoot}>
         <View style={styles.bgGlowTop} />
         <View style={styles.bgGlowBottom} />
+        <AdminButton onOpen={() => setShowAdmin(true)} />
         <View style={styles.connectCard}>
           <Text style={styles.connectTitle}>Checking License</Text>
           <Text style={styles.connectSubtitle}>Preparing device activation state...</Text>
         </View>
+        <AdminPanel visible={showAdmin} onClose={() => setShowAdmin(false)} />
       </View>
     );
   }
@@ -1658,6 +1687,7 @@ export default function App() {
       <View style={styles.connectRoot}>
         <View style={styles.bgGlowTop} />
         <View style={styles.bgGlowBottom} />
+        <AdminButton onOpen={() => setShowAdmin(true)} />
         <View style={styles.licenseCard}>
           <Text style={styles.connectTitle}>Activate Device</Text>
           <Text style={styles.licenseHint}>Share Device ID and enter license key provided by admin.</Text>
@@ -1696,6 +1726,7 @@ export default function App() {
 
           <Text style={styles.licenseStatus}>{licenseStatus}</Text>
         </View>
+        <AdminPanel visible={showAdmin} onClose={() => setShowAdmin(false)} />
       </View>
     );
   }
@@ -1742,6 +1773,7 @@ export default function App() {
             <Text style={styles.statusText}>{connectStatusText}</Text>
           </View>
         </View>
+        <AdminPanel visible={showAdmin} onClose={() => setShowAdmin(false)} />
       </View>
     );
   }

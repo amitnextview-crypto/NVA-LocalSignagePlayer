@@ -1,15 +1,15 @@
 {
   "orientation": "horizontal",
-  "layout": "fullscreen",
+  "layout": "grid2",
   "grid3Layout": "stack-h",
   "gridRatio": "1:1",
-  "slideDuration": 4,
+  "slideDuration": 5,
   "animation": "slide",
   "bgColor": "#000000",
   "sections": [
     {
       "slideDirection": "left",
-      "slideDuration": 4,
+      "slideDuration": 5,
       "sourceType": "multimedia",
       "sourceUrl": ""
     },
@@ -20,18 +20,18 @@
       "sourceUrl": ""
     },
     {
-      "slideDirection": "right",
-      "slideDuration": 6,
+      "slideDirection": "left",
+      "slideDuration": 5,
       "sourceType": "multimedia",
       "sourceUrl": ""
     }
   ],
   "ticker": {
     "text": "Breaking News: NextView Premium Product New Update Available!",
-    "color": "#f9f1f1",
-    "bgColor": "#014b1e",
-    "speed": 12,
-    "fontSize": 21,
+    "color": "#ffffff",
+    "bgColor": "#a21515",
+    "speed": 6,
+    "fontSize": 24,
     "position": "bottom"
   },
   "cache": {
@@ -39,8 +39,8 @@
   },
   "schedule": {
     "enabled": false,
-    "start": "14:42",
-    "end": "16:59",
+    "start": "09:00",
+    "end": "18:00",
     "days": [
       0,
       1,
@@ -51,8 +51,8 @@
       6
     ],
     "fallbackMode": "black",
-    "fallbackMessage": "store closed at 9:00 pm",
-    "fallbackImageUrl": "https://www.nexttechgroup.com/nextview/public/Profile-PIC.png",
+    "fallbackMessage": "Playback is currently scheduled off.",
+    "fallbackImageUrl": "",
     "fallbackTextColor": "#ffffff",
     "fallbackBgColor": "#000000"
   }

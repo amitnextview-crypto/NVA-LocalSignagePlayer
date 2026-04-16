@@ -270,6 +270,12 @@ h3 {
   word-break: break-all;
 }
 
+.dashboard-card-subtitle {
+  margin-bottom: 8px;
+  color: #8fb0c8;
+  font-size: 11px;
+}
+
 .dashboard-card-meta {
   color: #a8c3d8;
   font-size: 11px;
@@ -342,6 +348,73 @@ h3 {
   display: grid;
   grid-template-columns: 160px 1fr;
   gap: 8px 12px;
+}
+
+.group-create-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+}
+
+.device-checklist,
+.rename-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.device-check-item,
+.rename-item {
+  display: grid;
+  gap: 8px;
+  border-radius: 10px;
+  border: 1px solid rgba(146, 198, 233, 0.18);
+  background: rgba(9, 16, 24, 0.38);
+  padding: 8px;
+}
+
+.device-check-item {
+  grid-template-columns: auto 1fr;
+  align-items: center;
+}
+
+.device-check-item input[type="checkbox"] {
+  width: auto;
+  margin: 0;
+}
+
+.device-check-text,
+.rename-text {
+  display: grid;
+  gap: 2px;
+}
+
+.device-check-title,
+.rename-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: #eff8ff;
+}
+
+.device-check-meta,
+.rename-meta {
+  font-size: 11px;
+  color: #9ebbd2;
+}
+
+.rename-item {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  align-items: center;
+}
+
+.rename-item input {
+  min-width: 0;
+}
+
+.group-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
 }
 
 label {

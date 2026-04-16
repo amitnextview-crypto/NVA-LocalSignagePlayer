@@ -3,11 +3,20 @@
     "sections": {
       "1": {
         "section": 1,
-        "cycleId": "1-1776335017342_yy0wof",
-        "syncAt": 1776335020489,
-        "updatedAt": 1776335017477,
-        "fileCount": 7,
-        "mediaSignature": "videoplayback.mp4|videoplayback__4_.mp4|videoplayback__5_.mp4|WhatsApp_Video_2025-08-13_at_11.24.55.mp4|WhatsApp_Video_2025-09-19_at_14.23.37.mp4|WhatsApp_Video_2026-03-27_at_3.01.16_PM.mp4|____WATCH_______________________________________________________________________.mp4",
+        "cycleId": "1-1776342293357_ssf4mv",
+        "syncAt": 1776342296514,
+        "updatedAt": 1776342293481,
+        "fileCount": 1,
+        "mediaSignature": "0_Motivational_Inspiration_1080x1920.mp4",
+        "targetDevice": "all"
+      },
+      "2": {
+        "section": 2,
+        "cycleId": "2-1776342219577_m5qwx0",
+        "syncAt": 1776342222873,
+        "updatedAt": 1776342219859,
+        "fileCount": 1,
+        "mediaSignature": "1d5b0ab3-8e47-4827-857d-d754f15ae422.jpg",
         "targetDevice": "all"
       }
     }

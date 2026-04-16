@@ -39,8 +39,57 @@ let previewPollTimer = null;
 let alertsPollTimer = null;
 let selectedGridRatio = "1:1:1";
 let latestDeviceStatusList = [];
+let latestDeviceCatalog = { devices: [], groups: [] };
 let isDeviceDashboardOpen = false;
 const seenApkUpdateSuccessNotices = new Set();
+
+function escapeHtml(value) {
+  return String(value || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function getSelectedTargetValue() {
+  return document.getElementById("deviceSelect")?.value || "all";
+}
+
+function isGroupTarget(value) {
+  return String(value || "").startsWith("group:");
+}
+
+function getGroupIdFromTarget(value) {
+  return isGroupTarget(value) ? String(value || "").slice(6) : "";
+}
+
+function getGroupById(groupId) {
+  return (latestDeviceCatalog.groups || []).find((item) => item.id === groupId) || null;
+}
+
+function getDeviceById(deviceId) {
+  return (latestDeviceCatalog.devices || []).find((item) => item.deviceId === deviceId) || null;
+}
+
+function getDeviceDisplayName(deviceId) {
+  const item = getDeviceById(deviceId);
+  return item?.displayName || item?.customName || deviceId;
+}
+
+function getTargetLabel(targetValue) {
+  if (targetValue === "all") return "all connected devices";
+  if (isGroupTarget(targetValue)) {
+    return `group ${getGroupById(getGroupIdFromTarget(targetValue))?.name || getGroupIdFromTarget(targetValue)}`;
+  }
+  return `device ${getDeviceDisplayName(targetValue)}`;
+}
+
+function getPreviewTargetDeviceId(targetValue) {
+  if (!isGroupTarget(targetValue)) return targetValue || "all";
+  const group = getGroupById(getGroupIdFromTarget(targetValue));
+  return group?.deviceIds?.[0] || "all";
+}
 
 function removeActiveMessageDialogs() {
   document.querySelectorAll(".message-overlay").forEach((el) => el.remove());
@@ -369,6 +418,7 @@ function sanitizeUploadErrorMessage(message, statusCode) {
 }
 
 async function canUploadVideosToSection(deviceId, section) {
+  if (isGroupTarget(deviceId)) return true;
   const res = await fetch(`/media-list?deviceId=${deviceId}&ts=${Date.now()}`);
   const files = await res.json();
   const hasVideoOrPptElsewhere = (files || []).some((f) => {
@@ -381,6 +431,7 @@ async function canUploadVideosToSection(deviceId, section) {
 }
 
 async function canUploadPptToSection(deviceId, section) {
+  if (isGroupTarget(deviceId)) return true;
   const res = await fetch(`/media-list?deviceId=${deviceId}&ts=${Date.now()}`);
   const files = await res.json();
   const hasVideoOrPptElsewhere = (files || []).some((f) => {
@@ -999,8 +1050,8 @@ function resetPreviewState() {
 }
 
 function getSelectedDeviceStatus() {
-  const selectedDevice = document.getElementById("deviceSelect")?.value || "all";
-  if (selectedDevice === "all") return null;
+  const selectedDevice = getSelectedTargetValue();
+  if (selectedDevice === "all" || isGroupTarget(selectedDevice)) return null;
   return latestDeviceStatusList.find((entry) => entry.deviceId === selectedDevice) || null;
 }
 
@@ -1517,7 +1568,8 @@ function buildConfigFromForm() {
 
 async function loadPreviewMedia(deviceId) {
   try {
-    const res = await fetch(`/media-list?deviceId=${deviceId}&ts=${Date.now()}`);
+    const previewDeviceId = getPreviewTargetDeviceId(deviceId);
+    const res = await fetch(`/media-list?deviceId=${previewDeviceId}&ts=${Date.now()}`);
     const files = await res.json();
     const grouped = { 1: [], 2: [], 3: [] };
     for (const file of files) {
@@ -1543,7 +1595,7 @@ function startPreviewPolling() {
   }
 
   previewPollTimer = setInterval(async () => {
-    const deviceId = document.getElementById("deviceSelect")?.value || "all";
+    const deviceId = getSelectedTargetValue();
     await loadPreviewMedia(deviceId);
     renderScreenPreview();
   }, 15000);
@@ -1599,17 +1651,29 @@ function renderHealthSummary(statusList) {
 
   const detailsEl = document.getElementById("selectedDeviceDetails");
   if (!detailsEl) return;
-  const selectedDevice = document.getElementById("deviceSelect")?.value || "all";
+  const selectedDevice = getSelectedTargetValue();
   if (selectedDevice === "all") {
     detailsEl.textContent =
       "All devices selected.\nChoose a single device to view detailed health, storage, app version, and last sync info.";
+  } else if (isGroupTarget(selectedDevice)) {
+    const group = getGroupById(getGroupIdFromTarget(selectedDevice));
+    const members = Array.isArray(group?.deviceIds) ? group.deviceIds : [];
+    const names = members.map((deviceId) => getDeviceDisplayName(deviceId));
+    detailsEl.textContent = [
+      `Group: ${group?.name || getGroupIdFromTarget(selectedDevice)}`,
+      `Devices: ${members.length || 0}`,
+      members.length ? `Members: ${names.join(", ")}` : "Members: No devices added yet.",
+      "Choose a single device to view detailed runtime health.",
+    ].join("\n");
   } else {
     const item = list.find((entry) => entry.deviceId === selectedDevice);
     if (!item) {
       detailsEl.textContent = "Selected device is currently not connected to CMS.";
     } else {
       const lines = [
+        `Name: ${item.displayName || item.customName || item.deviceId}`,
         `Device: ${item.deviceId}`,
+        `Groups: ${Array.isArray(item.groups) && item.groups.length ? item.groups.join(", ") : "-"}`,
         `State: ${item.online ? "Online" : "Offline"}`,
         `Last Seen: ${formatStatusTime(item.lastSeen)}`,
         `App Version: ${item.meta?.appVersion || "-"}`,
@@ -1670,7 +1734,7 @@ function renderDeviceDashboardList(statusList) {
   const box = document.getElementById("deviceDashboardList");
   if (!box) return;
   const list = Array.isArray(statusList) ? statusList : [];
-  const selectedDevice = document.getElementById("deviceSelect")?.value || "all";
+  const selectedDevice = getSelectedTargetValue();
   const searchValue = String(document.getElementById("deviceDashboardSearch")?.value || "")
     .trim()
     .toLowerCase();
@@ -1679,6 +1743,8 @@ function renderDeviceDashboardList(statusList) {
     : list.filter((item) => {
         const haystack = [
           item.deviceId,
+          item.displayName,
+          ...(Array.isArray(item.groups) ? item.groups : []),
           item.appState,
           item.lastError,
           item.meta?.appVersion,
@@ -1703,8 +1769,10 @@ function renderDeviceDashboardList(statusList) {
       const storageRatio = totalBytes > 0 ? freeBytes / totalBytes : 1;
       const lowStorage = totalBytes > 0 && storageRatio < 0.12;
       const summaryLines = [
+        `Name: ${item.displayName || item.deviceId}`,
         `Version: ${item.meta?.appVersion || "-"}`,
         `Last Seen: ${formatStatusTime(item.lastSeen)}`,
+        `Groups: ${Array.isArray(item.groups) && item.groups.length ? item.groups.join(", ") : "-"}`,
         `Storage: ${formatMetaStorage(item.meta?.freeBytes || 0, item.meta?.totalBytes || 0)}`,
         `Media: ${formatBytes(item.meta?.mediaBytes || 0)}`,
         `Cache: ${formatBytes(item.meta?.cacheBytes || 0)}`,
@@ -1746,9 +1814,10 @@ function renderDeviceDashboardList(statusList) {
           onclick="selectDeviceFromDashboard('${String(item.deviceId).replace(/'/g, "\\'")}')"
         >
           <div class="dashboard-card-head">
-            <div class="dashboard-card-title">${item.deviceId}</div>
+            <div class="dashboard-card-title">${escapeHtml(item.displayName || item.deviceId)}</div>
             <div class="alert-state ${item.online ? "online" : item.lastError ? "error" : "offline"}">${stateText}</div>
           </div>
+          <div class="dashboard-card-subtitle">${escapeHtml(item.deviceId)}</div>
           <div class="dashboard-card-meta">${summaryLines.join("\n")}</div>
         </button>
       `;
@@ -1917,10 +1986,15 @@ function selectGrid3Layout(layoutId) {
 
 async function loadDevices() {
   const res = await fetch("/devices");
-  const devices = await res.json();
+  const payload = await res.json();
+  latestDeviceCatalog = {
+    devices: Array.isArray(payload?.devices) ? payload.devices : [],
+    groups: Array.isArray(payload?.groups) ? payload.groups : [],
+  };
 
   const select = document.getElementById("deviceSelect");
-  const currentSelected = select.value;
+  const currentSelected = select?.value || "all";
+  if (!select) return;
   select.innerHTML = "";
 
   const allOption = document.createElement("option");
@@ -1928,17 +2002,208 @@ async function loadDevices() {
   allOption.textContent = "All Devices";
   select.appendChild(allOption);
 
-  devices.forEach((d) => {
+  latestDeviceCatalog.groups.forEach((group) => {
     const opt = document.createElement("option");
-    opt.value = d;
-    opt.textContent = d;
+    opt.value = `group:${group.id}`;
+    opt.textContent = `Group: ${group.name}`;
     select.appendChild(opt);
   });
 
-  select.value = devices.includes(currentSelected) ? currentSelected : "all";
+  latestDeviceCatalog.devices.forEach((device) => {
+    const opt = document.createElement("option");
+    opt.value = device.deviceId;
+    opt.textContent =
+      device.displayName && device.displayName !== device.deviceId
+        ? `${device.displayName} (${device.deviceId})`
+        : device.deviceId;
+    select.appendChild(opt);
+  });
+
+  const availableValues = [
+    "all",
+    ...latestDeviceCatalog.groups.map((group) => `group:${group.id}`),
+    ...latestDeviceCatalog.devices.map((device) => device.deviceId),
+  ];
+  select.value = availableValues.includes(currentSelected) ? currentSelected : "all";
+  renderGroupEditor();
+  renderDeviceRenameList();
+}
+
+function renderGroupEditor() {
+  const groupSelect = document.getElementById("groupSelect");
+  const groupEditName = document.getElementById("groupEditName");
+  const checklist = document.getElementById("groupDeviceChecklist");
+  if (!groupSelect || !groupEditName || !checklist) return;
+
+  const currentSelected = groupSelect.value || "";
+  groupSelect.innerHTML = `<option value="">Select Group</option>`;
+  latestDeviceCatalog.groups.forEach((group) => {
+    const option = document.createElement("option");
+    option.value = group.id;
+    option.textContent = group.name;
+    groupSelect.appendChild(option);
+  });
+  groupSelect.value = latestDeviceCatalog.groups.some((group) => group.id === currentSelected)
+    ? currentSelected
+    : "";
+
+  const group = getGroupById(groupSelect.value);
+  groupEditName.value = group?.name || "";
+
+  checklist.innerHTML = latestDeviceCatalog.devices.length
+    ? latestDeviceCatalog.devices
+        .map((device) => {
+          const checked = !!group?.deviceIds?.includes(device.deviceId);
+          return `
+            <label class="device-check-item">
+              <input type="checkbox" value="${escapeHtml(device.deviceId)}" ${checked ? "checked" : ""} />
+              <div class="device-check-text">
+                <div class="device-check-title">${escapeHtml(device.displayName || device.deviceId)}</div>
+                <div class="device-check-meta">${escapeHtml(device.deviceId)}</div>
+              </div>
+            </label>
+          `;
+        })
+        .join("")
+    : `<div class="alerts-empty">No devices available yet.</div>`;
+}
+
+function renderDeviceRenameList() {
+  const box = document.getElementById("deviceRenameList");
+  if (!box) return;
+  box.innerHTML = latestDeviceCatalog.devices.length
+    ? latestDeviceCatalog.devices
+        .map((device) => `
+          <div class="rename-item">
+            <div class="rename-text">
+              <div class="rename-title">${escapeHtml(device.displayName || device.deviceId)}</div>
+              <div class="rename-meta">${escapeHtml(device.deviceId)}</div>
+            </div>
+            <input
+              type="text"
+              id="rename-${escapeHtml(device.deviceId)}"
+              value="${escapeHtml(device.customName || "")}"
+              placeholder="Custom device name"
+            />
+            <button class="btn primary" type="button" onclick="renameDeviceLabel('${String(device.deviceId).replace(/'/g, "\\'")}')">Save</button>
+          </div>
+        `)
+        .join("")
+    : `<div class="alerts-empty">No devices available yet.</div>`;
+}
+
+async function createDeviceGroup() {
+  const input = document.getElementById("newGroupName");
+  const name = String(input?.value || "").trim();
+  if (!name) {
+    showNotice("warning", "Group Name Required", "Enter a group name first.");
+    return;
+  }
+  const res = await fetch("/device-groups", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name }),
+  });
+  const data = await res.json();
+  if (!data?.ok) {
+    showNotice("error", "Create Failed", data?.error || "Unable to create group.");
+    return;
+  }
+  if (input) input.value = "";
+  await loadDevices();
+  const groupSelect = document.getElementById("groupSelect");
+  if (groupSelect && data.group?.id) {
+    groupSelect.value = data.group.id;
+    renderGroupEditor();
+  }
+  showNotice("success", "Group Created", "Device group created successfully.");
+}
+
+async function saveDeviceGroup() {
+  const groupSelect = document.getElementById("groupSelect");
+  const groupEditName = document.getElementById("groupEditName");
+  const checklist = document.getElementById("groupDeviceChecklist");
+  const groupId = String(groupSelect?.value || "").trim();
+  if (!groupId) {
+    showNotice("warning", "Select Group", "Choose a group to save.");
+    return;
+  }
+  const deviceIds = Array.from(
+    checklist?.querySelectorAll('input[type="checkbox"]:checked') || []
+  ).map((input) => String(input.value || "").trim());
+  const res = await fetch(`/device-groups/${encodeURIComponent(groupId)}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      name: String(groupEditName?.value || "").trim(),
+      deviceIds,
+    }),
+  });
+  const data = await res.json();
+  if (!data?.ok) {
+    showNotice("error", "Save Failed", data?.error || "Unable to save group.");
+    return;
+  }
+  await loadDevices();
+  if (groupSelect) groupSelect.value = groupId;
+  renderGroupEditor();
+  await loadDeviceAlerts();
+  showNotice("success", "Group Saved", "Group updated successfully.");
+}
+
+async function deleteDeviceGroup() {
+  const groupSelect = document.getElementById("groupSelect");
+  const groupId = String(groupSelect?.value || "").trim();
+  if (!groupId) {
+    showNotice("warning", "Select Group", "Choose a group to delete.");
+    return;
+  }
+  const group = getGroupById(groupId);
+  const confirmed = await showConfirmDialog(
+    "Delete Group",
+    `Delete group ${group?.name || groupId}?`,
+    "Delete",
+    "Cancel"
+  );
+  if (!confirmed) return;
+  const res = await fetch(`/device-groups/${encodeURIComponent(groupId)}`, {
+    method: "DELETE",
+  });
+  const data = await res.json();
+  if (!data?.ok) {
+    showNotice("error", "Delete Failed", data?.error || "Unable to delete group.");
+    return;
+  }
+  await loadDevices();
+  await loadDeviceAlerts();
+  showNotice("success", "Group Deleted", "Group removed successfully.");
+}
+
+async function renameDeviceLabel(deviceId) {
+  const input = document.getElementById(`rename-${deviceId}`);
+  const customName = String(input?.value || "").trim();
+  const res = await fetch(`/devices/${encodeURIComponent(deviceId)}/rename`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ customName }),
+  });
+  const data = await res.json();
+  if (!data?.ok) {
+    showNotice("error", "Rename Failed", data?.error || "Unable to rename device.");
+    return;
+  }
+  const previousTarget = getSelectedTargetValue();
+  await loadDevices();
+  const deviceSelect = document.getElementById("deviceSelect");
+  if (deviceSelect) {
+    deviceSelect.value = previousTarget;
+  }
+  await loadDeviceAlerts();
+  showNotice("success", "Device Renamed", "Device name updated successfully.");
 }
 
 async function uploadMedia(section) {
+  const targetValue = getSelectedTargetValue();
   const sourceType = document.getElementById(`sourceType${section}`)?.value || SECTION_SOURCE_TYPES.multimedia;
   if (sourceType !== SECTION_SOURCE_TYPES.multimedia) {
     showNotice("info", "Upload Not Required", "For Website/YouTube source, upload is not required. Save settings only.");
@@ -1972,7 +2237,7 @@ async function uploadMedia(section) {
     loader.classList.remove("hidden");
     updateUploadProgress(0, "Preparing upload...");
 
-    const deviceId = document.getElementById("deviceSelect").value;
+    const deviceId = targetValue;
     if (selectedHasVideo) {
       const allowed = await canUploadVideosToSection(deviceId, section);
       if (!allowed) {
@@ -2053,7 +2318,8 @@ async function uploadMedia(section) {
       `Uploading ${uploadFiles.length} file(s), ${formatBytes(totalSize)}`
     );
 
-    await uploadWithProgress(`/upload/${deviceId}/section/${section}`, formData, (percent) => {
+    const uploadUrl = `/upload/${encodeURIComponent(deviceId)}/section/${section}?targetDevice=${encodeURIComponent(deviceId)}`;
+    await uploadWithProgress(uploadUrl, formData, (percent) => {
       updateUploadProgress(percent, "Uploading media...");
     });
 
@@ -2077,7 +2343,7 @@ async function uploadMedia(section) {
 }
 
 async function loadConfig() {
-  const targetDevice = document.getElementById("deviceSelect")?.value || "all";
+  const targetDevice = getSelectedTargetValue();
   const res = await fetch(`/config?deviceId=${targetDevice}&ts=${Date.now()}`);
   const config = await res.json();
 
@@ -2127,7 +2393,7 @@ async function loadConfig() {
 
 async function saveConfig() {
   const config = buildConfigFromForm();
-  const targetDevice = document.getElementById("deviceSelect").value;
+  const targetDevice = getSelectedTargetValue();
 
   currentConfig = config;
   const res = await fetch("/config", {
@@ -2157,11 +2423,11 @@ async function saveConfig() {
 }
 
 async function clearDeviceData() {
-  const deviceId = document.getElementById("deviceSelect").value;
+  const deviceId = getSelectedTargetValue();
   const confirmMsg =
     deviceId === "all"
       ? "Are you sure? This will clear app data on ALL connected devices."
-      : "Are you sure? This will clear app data.";
+      : `Are you sure? This will clear app data on ${getTargetLabel(deviceId)}.`;
 
   if (!(await showConfirmDialog("Clear Device Data", confirmMsg, "Yes, Clear", "Cancel"))) return;
 
@@ -2175,11 +2441,11 @@ async function clearDeviceData() {
 }
 
 async function clearDeviceCache() {
-  const deviceId = document.getElementById("deviceSelect").value;
+  const deviceId = getSelectedTargetValue();
   const confirmMsg =
     deviceId === "all"
       ? "Clear cache on ALL connected devices?"
-      : `Clear cache on device ${deviceId}?`;
+      : `Clear cache on ${getTargetLabel(deviceId)}?`;
 
   if (!(await showConfirmDialog("Clear Device Cache", confirmMsg, "Yes, Clear", "Cancel"))) return;
 
@@ -2197,11 +2463,11 @@ async function clearDeviceCache() {
 }
 
 async function restartDeviceApp() {
-  const deviceId = document.getElementById("deviceSelect").value;
+  const deviceId = getSelectedTargetValue();
   const confirmMsg =
     deviceId === "all"
       ? "Restart app on ALL connected devices?"
-      : `Restart app on device ${deviceId}?`;
+      : `Restart app on ${getTargetLabel(deviceId)}?`;
 
   if (!(await showConfirmDialog("Restart App", confirmMsg, "Yes, Restart", "Cancel"))) return;
 
@@ -2220,12 +2486,12 @@ async function restartDeviceApp() {
 }
 
 async function setAutoReopen(enabled) {
-  const deviceId = document.getElementById("deviceSelect").value;
+  const deviceId = getSelectedTargetValue();
   const label = enabled ? "enable" : "disable";
   const confirmMsg =
     deviceId === "all"
       ? `Apply "${label} auto reopen" on ALL connected devices?`
-      : `Apply "${label} auto reopen" on device ${deviceId}?`;
+      : `Apply "${label} auto reopen" on ${getTargetLabel(deviceId)}?`;
 
   if (!(await showConfirmDialog("Auto Reopen", confirmMsg, "Apply", "Cancel"))) return;
 
@@ -2249,7 +2515,7 @@ async function setAutoReopen(enabled) {
 
 async function uploadAndInstallAppUpdate() {
   const fileInput = document.getElementById("appUpdateFile");
-  const deviceId = document.getElementById("deviceSelect").value;
+  const deviceId = getSelectedTargetValue();
   const file = fileInput?.files?.[0];
   if (!file) {
     showNotice("warning", "APK Required", "Select an APK file first.");
@@ -2258,7 +2524,7 @@ async function uploadAndInstallAppUpdate() {
 
   const confirmed = await showConfirmDialog(
     "Update App",
-    `Upload and install ${file.name} on ${deviceId === "all" ? "all connected devices" : `device ${deviceId}`}?`,
+    `Upload and install ${file.name} on ${getTargetLabel(deviceId)}?`,
     "Upload And Update",
     "Cancel"
   );
@@ -2322,13 +2588,18 @@ window.setAutoReopen = setAutoReopen;
 window.uploadAndInstallAppUpdate = uploadAndInstallAppUpdate;
 window.toggleDeviceDashboard = toggleDeviceDashboard;
 window.selectDeviceFromDashboard = selectDeviceFromDashboard;
+window.createDeviceGroup = createDeviceGroup;
+window.saveDeviceGroup = saveDeviceGroup;
+window.deleteDeviceGroup = deleteDeviceGroup;
+window.renderGroupEditor = renderGroupEditor;
+window.renameDeviceLabel = renameDeviceLabel;
 
-document.addEventListener("DOMContentLoaded", () => {
+document.addEventListener("DOMContentLoaded", async () => {
   renderGrid3LayoutOptions();
   updateScheduleFallbackVisibility();
   updateUploadProgress(0, "Preparing upload...");
-  loadDevices();
-  loadConfig();
+  await loadDevices();
+  await loadConfig();
   startPreviewPolling();
   startAlertsPolling();
 

@@ -2,7 +2,16 @@ const fs = require("fs");
 const path = require("path");
 const express = require("express");
 const multer = require("multer");
-const { getPlaybackTimeline } = require("../services/playbackTimeline");
+const {
+  getPlaybackTimeline,
+  clearDeviceTimeline,
+  clearAllTimelines,
+} = require("../services/playbackTimeline");
+const {
+  parseTargetValue,
+  resolveTargetDeviceIds,
+  sanitizeDeviceId,
+} = require("../services/deviceRegistry");
 
 const router = express.Router();
 
@@ -14,17 +23,112 @@ const assetBasePath = process.pkg
   : path.join(__dirname, "..");
 
 const CONFIG_DIR = path.join(basePath, "data", "configs");
+const UPLOADS_DIR = path.join(basePath, "uploads");
 const FALLBACK_DIR = path.join(basePath, "uploads", "fallbacks");
 const UPDATE_DIR = path.join(basePath, "uploads", "updates");
 const DEFAULT_CONFIG_PATH = path.join(CONFIG_DIR, "default.json");
 const ASSET_DEFAULT_CONFIG_PATH = path.join(assetBasePath, "data", "configs", "default.json");
-const SAFE_DEVICE_RE = /^[a-zA-Z0-9_-]{1,64}$/;
+function getTargetDevices(targetValue) {
+  return resolveTargetDeviceIds(
+    targetValue,
+    global.deviceStatus || {},
+    global.connectedDevices || {}
+  );
+}
 
-function sanitizeDeviceId(value) {
-  const id = String(value || "").trim();
-  if (id === "all") return id;
-  if (!SAFE_DEVICE_RE.test(id)) return "";
-  return id;
+function cloneDefaultConfig() {
+  return JSON.parse(JSON.stringify(DEFAULT_CONFIG_TEMPLATE));
+}
+
+function ensureDir(dirPath) {
+  if (!fs.existsSync(dirPath)) {
+    fs.mkdirSync(dirPath, { recursive: true });
+  }
+}
+
+function clearDeviceServerData(deviceId) {
+  const safeDeviceId = sanitizeDeviceId(deviceId);
+  if (!safeDeviceId) return;
+  const deviceUploadDir = path.join(UPLOADS_DIR, safeDeviceId);
+  try {
+    if (fs.existsSync(deviceUploadDir)) {
+      fs.rmSync(deviceUploadDir, { recursive: true, force: true });
+    }
+  } catch {
+  }
+  ensureDir(deviceUploadDir);
+  for (let section = 1; section <= 3; section += 1) {
+    try {
+      fs.writeFileSync(
+        path.join(deviceUploadDir, `section${section}__cleared.txt`),
+        String(Date.now()),
+        "utf8"
+      );
+    } catch {
+    }
+  }
+
+  try {
+    fs.writeFileSync(
+      path.join(CONFIG_DIR, `${safeDeviceId}.json`),
+      JSON.stringify(cloneDefaultConfig(), null, 2)
+    );
+  } catch {
+  }
+
+  clearDeviceTimeline(safeDeviceId);
+}
+
+function clearAllServerData() {
+  try {
+    if (fs.existsSync(UPLOADS_DIR)) {
+      fs.rmSync(UPLOADS_DIR, { recursive: true, force: true });
+    }
+  } catch {
+  }
+  ensureDir(UPLOADS_DIR);
+  ensureDir(FALLBACK_DIR);
+  ensureDir(UPDATE_DIR);
+
+  try {
+    const files = fs.existsSync(CONFIG_DIR) ? fs.readdirSync(CONFIG_DIR) : [];
+    files.forEach((file) => {
+      if (!file.endsWith(".json")) return;
+      const targetPath = path.join(CONFIG_DIR, file);
+      if (file === "default.json") {
+        fs.writeFileSync(targetPath, JSON.stringify(cloneDefaultConfig(), null, 2));
+        return;
+      }
+      fs.rmSync(targetPath, { force: true });
+    });
+  } catch {
+  }
+
+  clearAllTimelines();
+}
+
+function emitToTarget(targetValue, eventName, payload) {
+  const target = parseTargetValue(targetValue);
+  if (target.type === "invalid") return false;
+  if (target.type === "all") {
+    if (global.io) {
+      global.io.emit(eventName, payload);
+      return true;
+    }
+    return false;
+  }
+
+  const deviceIds =
+    target.type === "group" ? getTargetDevices(targetValue) : [target.value];
+  let sent = false;
+  deviceIds.forEach((deviceId) => {
+    const socketId = global.connectedDevices?.[deviceId];
+    if (global.io && socketId) {
+      global.io.to(socketId).emit(eventName, payload);
+      sent = true;
+    }
+  });
+  return sent;
 }
 
 const DEFAULT_CONFIG_TEMPLATE = {
@@ -141,14 +245,21 @@ router.get("/", (req, res) => {
   res.setHeader("Expires", "0");
   res.setHeader("Surrogate-Control", "no-store");
 
-  const deviceId = sanitizeDeviceId(req.query.deviceId);
+  const target = parseTargetValue(req.query.deviceId || "all");
   let filePath;
 
-  if (deviceId) {
-    const devicePath = path.join(CONFIG_DIR, `${deviceId}.json`);
+  if (target.type === "device") {
+    const devicePath = path.join(CONFIG_DIR, `${target.value}.json`);
     filePath = fs.existsSync(devicePath)
       ? devicePath
       : DEFAULT_CONFIG_PATH;
+  } else if (target.type === "group") {
+    const groupMembers = getTargetDevices(`group:${target.value}`);
+    const firstDeviceId = groupMembers[0] || "";
+    const devicePath = firstDeviceId
+      ? path.join(CONFIG_DIR, `${firstDeviceId}.json`)
+      : "";
+    filePath = devicePath && fs.existsSync(devicePath) ? devicePath : DEFAULT_CONFIG_PATH;
   } else {
     filePath = DEFAULT_CONFIG_PATH;
   }
@@ -156,18 +267,20 @@ router.get("/", (req, res) => {
   const data = fs.readFileSync(filePath, "utf-8");
   res.json({
     ...JSON.parse(data),
-    playbackTimeline: getPlaybackTimeline(deviceId || "all"),
+    playbackTimeline: getPlaybackTimeline(
+      target.type === "device" ? target.value : "all"
+    ),
   });
 });
 
 router.post("/", (req, res) => {
   const { targetDevice, config } = req.body;
-  const safeTarget = sanitizeDeviceId(targetDevice);
-  if (!safeTarget) {
+  const target = parseTargetValue(targetDevice);
+  if (target.type === "invalid") {
     return res.status(400).json({ success: false, error: "invalid-device-id" });
   }
 
-  if (safeTarget === "all") {
+  if (target.type === "all") {
     const defaultPath = DEFAULT_CONFIG_PATH;
     fs.writeFileSync(defaultPath, JSON.stringify(config, null, 2));
 
@@ -183,111 +296,79 @@ router.post("/", (req, res) => {
       global.io.emit("config-updated");
     }
   } else {
-    const devicePath = path.join(CONFIG_DIR, `${safeTarget}.json`);
-    fs.writeFileSync(devicePath, JSON.stringify(config, null, 2));
-
-    if (global.io && global.connectedDevices?.[safeTarget]) {
-      const socketId = global.connectedDevices[safeTarget];
-      global.io.to(socketId).emit("config-updated");
-    }
+    const deviceIds =
+      target.type === "group" ? getTargetDevices(targetDevice) : [target.value];
+    deviceIds.forEach((deviceId) => {
+      const devicePath = path.join(CONFIG_DIR, `${deviceId}.json`);
+      fs.writeFileSync(devicePath, JSON.stringify(config, null, 2));
+    });
+    emitToTarget(targetDevice, "config-updated");
   }
 
   res.json({ success: true });
 });
 
 router.post("/clear-device", (req, res) => {
-  const safeTarget = sanitizeDeviceId(req.body?.targetDevice);
-  if (!safeTarget) {
+  const target = parseTargetValue(req.body?.targetDevice);
+  if (target.type === "invalid") {
     return res.json({ success: false, error: "invalid-device-id" });
   }
 
-  if (safeTarget === "all") {
-    if (global.io) {
-      global.io.emit("clear-data");
-      console.log("Clear data command sent to: all devices");
-      return res.json({ success: true });
-    }
-    return res.json({ success: false });
+  if (target.type === "all") {
+    clearAllServerData();
+  } else {
+    const deviceIds =
+      target.type === "group" ? getTargetDevices(req.body?.targetDevice) : [target.value];
+    deviceIds.forEach((deviceId) => clearDeviceServerData(deviceId));
   }
 
-  if (global.io && global.connectedDevices?.[safeTarget]) {
-    const socketId = global.connectedDevices[safeTarget];
-    global.io.to(socketId).emit("clear-data");
-    console.log("Clear data command sent to:", safeTarget);
+  const sent = emitToTarget(req.body?.targetDevice, "clear-data");
+  if (sent) {
+    console.log("Clear data command sent to:", req.body?.targetDevice || "all");
     return res.json({ success: true });
   }
-
   return res.json({ success: false });
 });
 
 router.post("/restart-device", (req, res) => {
-  const safeTarget = sanitizeDeviceId(req.body?.targetDevice);
-  if (!safeTarget) {
+  const target = parseTargetValue(req.body?.targetDevice);
+  if (target.type === "invalid") {
     return res.json({ success: false, error: "invalid-device-id" });
   }
 
-  if (safeTarget === "all") {
-    if (global.io) {
-      global.io.emit("restart-app");
-      return res.json({ success: true });
-    }
-    return res.json({ success: false });
-  }
-
-  if (global.io && global.connectedDevices?.[safeTarget]) {
-    const socketId = global.connectedDevices[safeTarget];
-    global.io.to(socketId).emit("restart-app");
-    console.log("Restart command sent to:", safeTarget);
+  const sent = emitToTarget(req.body?.targetDevice, "restart-app");
+  if (sent) {
+    console.log("Restart command sent to:", req.body?.targetDevice || "all");
     return res.json({ success: true });
   }
-
   return res.json({ success: false });
 });
 
 router.post("/clear-cache", (req, res) => {
-  const safeTarget = sanitizeDeviceId(req.body?.targetDevice);
-  if (!safeTarget) {
+  const target = parseTargetValue(req.body?.targetDevice);
+  if (target.type === "invalid") {
     return res.json({ success: false, error: "invalid-device-id" });
   }
 
-  if (safeTarget === "all") {
-    if (global.io) {
-      global.io.emit("clear-cache");
-      console.log("Clear cache command sent to: all devices");
-      return res.json({ success: true });
-    }
-    return res.json({ success: false });
-  }
-
-  if (global.io && global.connectedDevices?.[safeTarget]) {
-    const socketId = global.connectedDevices[safeTarget];
-    global.io.to(socketId).emit("clear-cache");
-    console.log("Clear cache command sent to:", safeTarget);
+  const sent = emitToTarget(req.body?.targetDevice, "clear-cache");
+  if (sent) {
+    console.log("Clear cache command sent to:", req.body?.targetDevice || "all");
     return res.json({ success: true });
   }
-
   return res.json({ success: false });
 });
 
 router.post("/auto-reopen", (req, res) => {
   const { enabled } = req.body || {};
-  const safeTarget = sanitizeDeviceId(req.body?.targetDevice);
-  if (!safeTarget) {
+  const target = parseTargetValue(req.body?.targetDevice);
+  if (target.type === "invalid") {
     return res.json({ success: false, error: "invalid-device-id" });
   }
   const flag = !!enabled;
-
-  if (safeTarget === "all") {
-    if (global.io) {
-      global.io.emit("set-auto-reopen", { enabled: flag });
-      return res.json({ success: true });
-    }
-    return res.json({ success: false });
-  }
-
-  if (global.io && global.connectedDevices?.[safeTarget]) {
-    const socketId = global.connectedDevices[safeTarget];
-    global.io.to(socketId).emit("set-auto-reopen", { enabled: flag });
+  const sent = emitToTarget(req.body?.targetDevice, "set-auto-reopen", {
+    enabled: flag,
+  });
+  if (sent) {
     return res.json({ success: true });
   }
 
@@ -314,8 +395,8 @@ router.post("/upload-app-update", (req, res) => {
 
 router.post("/install-app-update", (req, res) => {
   const { apkUrl } = req.body || {};
-  const safeTarget = sanitizeDeviceId(req.body?.targetDevice);
-  if (!safeTarget) {
+  const target = parseTargetValue(req.body?.targetDevice);
+  if (target.type === "invalid") {
     return res.json({ success: false, error: "invalid-device-id" });
   }
   const safeApkUrl = String(apkUrl || "").trim();
@@ -323,17 +404,10 @@ router.post("/install-app-update", (req, res) => {
     return res.status(400).json({ success: false, error: "APK URL missing" });
   }
 
-  if (safeTarget === "all") {
-    if (global.io) {
-      global.io.emit("install-app-update", { apkUrl: safeApkUrl });
-      return res.json({ success: true });
-    }
-    return res.json({ success: false });
-  }
-
-  if (global.io && global.connectedDevices?.[safeTarget]) {
-    const socketId = global.connectedDevices[safeTarget];
-    global.io.to(socketId).emit("install-app-update", { apkUrl: safeApkUrl });
+  const sent = emitToTarget(req.body?.targetDevice, "install-app-update", {
+    apkUrl: safeApkUrl,
+  });
+  if (sent) {
     return res.json({ success: true });
   }
 

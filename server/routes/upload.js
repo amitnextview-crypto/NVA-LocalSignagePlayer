@@ -6,6 +6,7 @@ const { execFile } = require("child_process");
 const { clearDeviceTimeline, updateSectionTimeline } = require("../services/playbackTimeline");
 const { encodeVideo } = require("../services/videoEncoder");
 const { safeStat, safeReaddir, safeExistsDir, safeExists, wait } = require("../utils/fsSafe");
+const { parseTargetValue, resolveTargetDeviceIds } = require("../services/deviceRegistry");
 
 const router = express.Router();
 
@@ -55,13 +56,33 @@ const MAX_FILE_SIZE_BYTES = 5 * 1024 * 1024 * 1024; // 5 GB
 const MAX_FILES_PER_UPLOAD = 120;
 const DISABLE_UPLOAD_TRANSCODE = String(process.env.DISABLE_UPLOAD_TRANSCODE || "") === "1";
 const DIRECT_PLAY_VIDEO_EXTENSIONS = new Set([".mp4"]);
-const SAFE_DEVICE_RE = /^[a-zA-Z0-9_-]{1,64}$/;
+function getTargetDeviceIds(targetValue) {
+  return resolveTargetDeviceIds(
+    targetValue,
+    global.deviceStatus || {},
+    global.connectedDevices || {}
+  );
+}
 
-function sanitizeDeviceId(value) {
-  const id = String(value || "").trim();
-  if (id === "all") return id;
-  if (!SAFE_DEVICE_RE.test(id)) return "";
-  return id;
+function resolveUploadTarget(req) {
+  const candidates = [
+    req?.params?.deviceId,
+    req?.query?.targetDevice,
+    req?.body?.targetDevice,
+  ];
+  for (const candidate of candidates) {
+    const parsed = parseTargetValue(candidate);
+    if (parsed.type !== "invalid") {
+      return {
+        raw: String(candidate || "").trim(),
+        parsed,
+      };
+    }
+  }
+  return {
+    raw: String(req?.params?.deviceId || "").trim(),
+    parsed: { type: "invalid", value: "" },
+  };
 }
 
 function emitSectionUploadStatus(deviceId, section, status, message = "") {
@@ -74,6 +95,17 @@ function emitSectionUploadStatus(deviceId, section, status, message = "") {
 
   if (String(deviceId) === "all") {
     global.io.emit("section-upload-status", payload);
+    return;
+  }
+
+  const target = parseTargetValue(deviceId);
+  if (target.type === "group") {
+    for (const memberId of getTargetDeviceIds(deviceId)) {
+      const memberSocketId = global.connectedDevices?.[memberId];
+      if (memberSocketId) {
+        global.io.to(memberSocketId).emit("section-upload-status", payload);
+      }
+    }
     return;
   }
 
@@ -414,12 +446,29 @@ async function renameWithRetry(fromPath, toPath, retries = 5, delayMs = 140) {
   throw lastErr || new Error("rename-failed");
 }
 
+function copyDirectoryRecursive(sourceDir, targetDir) {
+  ensureDir(targetDir);
+  const entries = safeReaddir(sourceDir);
+  for (const entry of entries) {
+    const sourcePath = path.join(sourceDir, entry);
+    const targetPath = path.join(targetDir, entry);
+    const stat = safeStat(sourcePath);
+    if (!stat) continue;
+    if (stat.isDirectory()) {
+      copyDirectoryRecursive(sourcePath, targetPath);
+    } else {
+      fs.copyFileSync(sourcePath, targetPath);
+    }
+  }
+}
+
 function sectionPaths(deviceId, section) {
   const sectionBase = path.join(uploadsBase, deviceId, `section${section}`);
   return {
     sectionBase,
     versionsDir: `${sectionBase}__versions`,
     activeFile: `${sectionBase}__active.txt`,
+    clearedFile: `${sectionBase}__cleared.txt`,
   };
 }
 
@@ -475,7 +524,7 @@ async function cleanupOldSectionVersions(versionsDir, keepVersion = "", keepCoun
 }
 
 async function activateIncomingSection(deviceId, section, incomingDir) {
-  const { sectionBase, versionsDir, activeFile } = sectionPaths(deviceId, section);
+  const { sectionBase, versionsDir, activeFile, clearedFile } = sectionPaths(deviceId, section);
   const incomingFiles = safeExistsDir(incomingDir) ? safeReaddir(incomingDir) : [];
   const versionName = buildVersionName();
   const versionDir = path.join(versionsDir, versionName);
@@ -496,6 +545,12 @@ async function activateIncomingSection(deviceId, section, incomingDir) {
     }),
     "utf8"
   );
+  try {
+    if (safeExists(clearedFile)) {
+      fs.rmSync(clearedFile, { force: true });
+    }
+  } catch {
+  }
 
   if (safeExistsDir(sectionBase)) {
     try {
@@ -550,21 +605,38 @@ async function optimizeVideosInDirectory(dirPath) {
 }
 
 router.post("/:deviceId/section/:section", (req, res) => {
-  const deviceId = sanitizeDeviceId(req.params.deviceId);
-  if (!deviceId) {
+  const resolvedTarget = resolveUploadTarget(req);
+  const targetValue = resolvedTarget.raw;
+  const target = resolvedTarget.parsed;
+  if (target.type === "invalid") {
     return res.status(400).json({ ok: false, error: "invalid-device-id" });
   }
   const section = req.params.section;
+  const targetDeviceIds =
+    target.type === "all"
+      ? []
+      : target.type === "group"
+      ? getTargetDeviceIds(targetValue)
+      : [target.value];
+  if (target.type === "group" && !targetDeviceIds.length) {
+    return res.status(400).json({ ok: false, error: "group-has-no-devices" });
+  }
+  const tempTargetId =
+    target.type === "all"
+      ? "all"
+      : target.type === "group"
+      ? `group_${String(target.value || "").replace(/[^a-zA-Z0-9_-]/g, "_")}`
+      : target.value;
 
   const uploadToken = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
   const tempSectionPath = path.join(
     uploadsBase,
-    deviceId,
+    tempTargetId,
     `section${section}__incoming_${uploadToken}`
   );
 
   try {
-    cleanupStaleIncomingDirs(deviceId, section);
+    cleanupStaleIncomingDirs(tempTargetId, section);
     ensureDir(tempSectionPath);
 
     const storage = multer.diskStorage({
@@ -589,7 +661,7 @@ router.post("/:deviceId/section/:section", (req, res) => {
     }).array("files");
 
     emitSectionUploadStatus(
-      deviceId,
+      targetValue,
       section,
       "processing",
       "Uploading media... Please wait."
@@ -614,7 +686,7 @@ router.post("/:deviceId/section/:section", (req, res) => {
               : humanizeUploadError(err, "Upload failed");
 
           console.error("Upload error:", message);
-          emitSectionUploadStatus(deviceId, section, "error", message);
+          emitSectionUploadStatus(targetValue, section, "error", message);
           return res.status(400).json({ error: message });
         }
 
@@ -626,7 +698,7 @@ router.post("/:deviceId/section/:section", (req, res) => {
         );
         if (presentationFiles.length) {
           emitSectionUploadStatus(
-            deviceId,
+            targetValue,
             section,
             "processing",
             "Converting PowerPoint to images... Please wait."
@@ -640,7 +712,7 @@ router.post("/:deviceId/section/:section", (req, res) => {
           } catch (pptErr) {
             fs.rmSync(tempSectionPath, { recursive: true, force: true });
             emitSectionUploadStatus(
-              deviceId,
+              targetValue,
               section,
               "error",
               "PowerPoint conversion failed. Install LibreOffice on CMS PC and retry."
@@ -666,10 +738,16 @@ router.post("/:deviceId/section/:section", (req, res) => {
             // ignore marker write errors
           }
         }
-        if (incomingHasVideo && anyOtherSectionHasVideoOrPpt(deviceId, section)) {
+        const validationTargets = target.type === "all" ? ["all"] : targetDeviceIds;
+        if (
+          incomingHasVideo &&
+          validationTargets.some((currentDeviceId) =>
+            anyOtherSectionHasVideoOrPpt(currentDeviceId, section)
+          )
+        ) {
           fs.rmSync(tempSectionPath, { recursive: true, force: true });
           emitSectionUploadStatus(
-            deviceId,
+            targetValue,
             section,
             "error",
             "Video/PPT allowed in only one section. Remove PPT/video from all sections first."
@@ -678,10 +756,15 @@ router.post("/:deviceId/section/:section", (req, res) => {
             error: "Video/PPT allowed in only one grid section. Remove PPT/video from all sections first.",
           });
         }
-        if (incomingHasPpt && anyOtherSectionHasVideoOrPpt(deviceId, section)) {
+        if (
+          incomingHasPpt &&
+          validationTargets.some((currentDeviceId) =>
+            anyOtherSectionHasVideoOrPpt(currentDeviceId, section)
+          )
+        ) {
           fs.rmSync(tempSectionPath, { recursive: true, force: true });
           emitSectionUploadStatus(
-            deviceId,
+            targetValue,
             section,
             "error",
             "PPT/video allowed in only one section. Remove PPT/video from all sections first."
@@ -694,7 +777,7 @@ router.post("/:deviceId/section/:section", (req, res) => {
         if (incomingHasVideo) {
           try {
             emitSectionUploadStatus(
-              deviceId,
+              targetValue,
               section,
               "processing",
               "Processing video for TV compatibility... Please wait."
@@ -705,11 +788,39 @@ router.post("/:deviceId/section/:section", (req, res) => {
           }
         }
 
-        const activation = await activateIncomingSection(deviceId, section, tempSectionPath);
+        let activations = [];
+        if (target.type === "all") {
+          activations = [
+            {
+              deviceId: "all",
+              activation: await activateIncomingSection("all", section, tempSectionPath),
+            },
+          ];
+        } else {
+          for (const currentDeviceId of targetDeviceIds) {
+            const memberIncomingPath = path.join(
+              uploadsBase,
+              currentDeviceId,
+              `section${section}__incoming_${uploadToken}`
+            );
+            if (safeExists(memberIncomingPath)) {
+              fs.rmSync(memberIncomingPath, { recursive: true, force: true });
+            }
+            ensureDir(memberIncomingPath);
+            copyDirectoryRecursive(tempSectionPath, memberIncomingPath);
+            activations.push({
+              deviceId: currentDeviceId,
+              activation: await activateIncomingSection(currentDeviceId, section, memberIncomingPath),
+            });
+          }
+          if (safeExists(tempSectionPath)) {
+            fs.rmSync(tempSectionPath, { recursive: true, force: true });
+          }
+        }
 
         // Apply "all" upload to all devices only after successful activation.
         // Remove per-device section overrides so they follow "all" immediately.
-        if (deviceId === "all" && safeExistsDir(uploadsBase)) {
+        if (target.type === "all" && safeExistsDir(uploadsBase)) {
           const folders = safeReaddir(uploadsBase);
           for (const folder of folders) {
             if (folder === "all") continue;
@@ -732,30 +843,47 @@ router.post("/:deviceId/section/:section", (req, res) => {
 
         console.log(
           "New files saved in:",
-          path.join(uploadsBase, deviceId, `section${section}`)
+          target.type === "all"
+            ? path.join(uploadsBase, "all", `section${section}`)
+            : targetDeviceIds.map((currentDeviceId) => path.join(uploadsBase, currentDeviceId, `section${section}`)).join(", ")
         );
 
         if (global.io) {
           const syncAt = Date.now() + 3000;
-          const timeline = updateSectionTimeline(deviceId, section, {
-            targetDevice: deviceId,
-            syncAt,
-            updatedAt: activation?.updatedAt || Date.now(),
-            cycleId: `${section}-${String(activation?.versionName || Date.now())}`,
-            fileCount: Array.isArray(activation?.activeFiles) ? activation.activeFiles.length : 0,
-            mediaSignature: Array.isArray(activation?.activeFiles)
-              ? activation.activeFiles.join("|")
-              : "",
-          });
-          if (deviceId === "all") {
+          if (target.type === "all") {
+            const activation = activations[0]?.activation || null;
+            const timeline = updateSectionTimeline("all", section, {
+              targetDevice: "all",
+              syncAt,
+              updatedAt: activation?.updatedAt || Date.now(),
+              cycleId: `${section}-${String(activation?.versionName || Date.now())}`,
+              fileCount: Array.isArray(activation?.activeFiles) ? activation.activeFiles.length : 0,
+              mediaSignature: Array.isArray(activation?.activeFiles)
+                ? activation.activeFiles.join("|")
+                : "",
+            });
             global.io.emit("media-updated", { syncAt, section, timeline });
-          } else if (global.connectedDevices?.[deviceId]) {
-            const socketId = global.connectedDevices[deviceId];
-            global.io.to(socketId).emit("media-updated", { syncAt, section, timeline });
+          } else {
+            for (const item of activations) {
+              const timeline = updateSectionTimeline(item.deviceId, section, {
+                targetDevice: item.deviceId,
+                syncAt,
+                updatedAt: item.activation?.updatedAt || Date.now(),
+                cycleId: `${section}-${String(item.activation?.versionName || Date.now())}`,
+                fileCount: Array.isArray(item.activation?.activeFiles) ? item.activation.activeFiles.length : 0,
+                mediaSignature: Array.isArray(item.activation?.activeFiles)
+                  ? item.activation.activeFiles.join("|")
+                  : "",
+              });
+              const socketId = global.connectedDevices?.[item.deviceId];
+              if (socketId) {
+                global.io.to(socketId).emit("media-updated", { syncAt, section, timeline });
+              }
+            }
           }
         }
 
-        emitSectionUploadStatus(deviceId, section, "ready", "");
+        emitSectionUploadStatus(targetValue, section, "ready", "");
         return res.json({ success: true });
       } catch (innerError) {
         if (safeExists(tempSectionPath)) {
@@ -765,7 +893,7 @@ router.post("/:deviceId/section/:section", (req, res) => {
         }
         const message = humanizeUploadError(innerError, "Upload failed on server");
         console.log("Upload error:", innerError);
-        emitSectionUploadStatus(deviceId, section, "error", message);
+        emitSectionUploadStatus(targetValue, section, "error", message);
         return res.status(500).json({ error: message });
       }
     });
@@ -776,7 +904,7 @@ router.post("/:deviceId/section/:section", (req, res) => {
       } catch (_e) {}
     }
     console.log("Upload error:", error);
-    emitSectionUploadStatus(deviceId, section, "error", humanizeUploadError(error, "Upload failed on server"));
+    emitSectionUploadStatus(targetValue, section, "error", humanizeUploadError(error, "Upload failed on server"));
     return res.status(500).json({ error: humanizeUploadError(error, "Upload failed on server") });
   }
 });

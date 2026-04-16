@@ -33,13 +33,42 @@
           <div class="device-toolbar">
             <div>
               <h2>Select Device</h2>
-              <p class="section-help">Choose one device or apply to all connected devices.</p>
+              <p class="section-help">Choose one device, one group, or apply to all connected devices.</p>
             </div>
             <button class="btn primary" type="button" onclick="toggleDeviceDashboard()">Device Dashboard</button>
           </div>
           <select id="deviceSelect">
             <option value="all">All Devices</option>
           </select>
+        </section>
+
+        <section class="card compact-card">
+          <h2>Groups</h2>
+          <p class="section-help">Create simple groups, add devices, edit names, or remove groups.</p>
+
+          <div class="group-create-row">
+            <input type="text" id="newGroupName" placeholder="New group name" />
+            <button class="btn primary" type="button" onclick="createDeviceGroup()">Create</button>
+          </div>
+
+          <div class="sub-card">
+            <label for="groupSelect">Edit Group</label>
+            <select id="groupSelect" onchange="renderGroupEditor()">
+              <option value="">Select Group</option>
+            </select>
+            <label for="groupEditName">Group Name</label>
+            <input type="text" id="groupEditName" placeholder="Group name" />
+            <div id="groupDeviceChecklist" class="device-checklist"></div>
+            <div class="group-actions">
+              <button class="btn primary" type="button" onclick="saveDeviceGroup()">Save Group</button>
+              <button class="btn danger" type="button" onclick="deleteDeviceGroup()">Delete Group</button>
+            </div>
+          </div>
+
+          <div class="sub-card">
+            <h3>Rename Devices</h3>
+            <div id="deviceRenameList" class="rename-list"></div>
+          </div>
         </section>
 
         <section class="card compact-card">

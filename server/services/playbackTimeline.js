@@ -103,6 +103,10 @@ function clearDeviceTimeline(deviceId) {
   }
 }
 
+function clearAllTimelines() {
+  writeStore(emptyStore());
+}
+
 function getPlaybackTimeline(deviceId) {
   const targetDevice = normalizeTargetDevice(deviceId);
   const store = readStore();
@@ -126,6 +130,7 @@ function getPlaybackTimeline(deviceId) {
 }
 
 module.exports = {
+  clearAllTimelines,
   clearDeviceTimeline,
   getPlaybackTimeline,
   updateSectionTimeline,

@@ -91,6 +91,14 @@ function resolveSectionDirectory(deviceId, sectionNo) {
   return "";
 }
 
+function getClearedMarkerPath(deviceId, sectionNo) {
+  return path.join(BASE_DIR, deviceId, `section${sectionNo}__cleared.txt`);
+}
+
+function isSectionExplicitlyCleared(deviceId, sectionNo) {
+  return safeExists(getClearedMarkerPath(deviceId, sectionNo));
+}
+
 function readActiveSectionFiles(sectionBase) {
   const activeFile = `${sectionBase}__active.txt`;
   if (!safeExists(activeFile)) return null;
@@ -133,7 +141,11 @@ router.get("/", (req, res) => {
 
     let chosen = tryReadSectionFiles(deviceId);
     // If device section exists but is empty/non-media, fall back to "all".
-    if (!chosen.files.length && String(deviceId) !== "all") {
+    if (
+      !chosen.files.length &&
+      String(deviceId) !== "all" &&
+      !isSectionExplicitlyCleared(deviceId, i)
+    ) {
       const fallback = tryReadSectionFiles("all");
       if (fallback.files.length) {
         chosen = fallback;

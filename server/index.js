@@ -6,6 +6,17 @@ const http = require("http");
 const { Server } = require("socket.io");
 const os = require("os");
 const { exec } = require("child_process");
+const {
+  ensureProfile,
+  renameDevice,
+  createGroup,
+  updateGroup,
+  deleteGroup,
+  listGroups,
+  listDevicesWithProfiles,
+  getGroupsForDevice,
+  sanitizeDeviceId,
+} = require("./services/deviceRegistry");
 
 // Runtime writable base path (user-local in pkg mode to avoid permission issues)
 const runtimeBasePath = process.pkg
@@ -314,8 +325,12 @@ function nowIso() {
 
 function upsertDeviceStatus(deviceId, patch = {}) {
   if (!deviceId) return;
+  const groups = getGroupsForDevice(deviceId);
   const prev = deviceStatus[deviceId] || {
     deviceId,
+    customName: "",
+    displayName: deviceId,
+    groups: [],
     online: false,
     lastSeen: null,
     lastError: null,
@@ -331,6 +346,11 @@ function upsertDeviceStatus(deviceId, patch = {}) {
     ...prev,
     ...patch,
     deviceId,
+    customName: String(patch?.customName ?? prev.customName ?? "").trim(),
+    displayName: String(
+      patch?.displayName || patch?.customName || prev.customName || deviceId
+    ).trim(),
+    groups,
     lastSeen: nowIso(),
   };
 }
@@ -351,27 +371,35 @@ function appendDeviceEvent(deviceId, type, message) {
 
 io.on("connection", (socket) => {
   socket.on("register-device", (deviceId) => {
-    connectedDevices[deviceId] = socket.id;
-    socketToDevice[socket.id] = deviceId;
-    upsertDeviceStatus(deviceId, {
+    const safeDeviceId = sanitizeDeviceId(deviceId);
+    if (!safeDeviceId) return;
+    const profile = ensureProfile(safeDeviceId) || { customName: "" };
+    connectedDevices[safeDeviceId] = socket.id;
+    socketToDevice[socket.id] = safeDeviceId;
+    upsertDeviceStatus(safeDeviceId, {
       online: true,
+      customName: profile.customName || "",
+      displayName: profile.customName || safeDeviceId,
       lastDisconnectReason: null,
       lastDisconnectAt: null,
       lastError: null,
       lastErrorAt: null,
       errorType: null,
     });
-    appendDeviceEvent(deviceId, "socket", "Device connected");
-    console.log("Device connected:", deviceId);
+    appendDeviceEvent(safeDeviceId, "socket", "Device connected");
+    console.log("Device connected:", safeDeviceId);
   });
 
   socket.on("device-health", (payload) => {
     const deviceId = String(payload?.deviceId || socketToDevice[socket.id] || "").trim();
     if (!deviceId) return;
+    const profile = ensureProfile(deviceId) || { customName: "" };
     connectedDevices[deviceId] = socket.id;
     socketToDevice[socket.id] = deviceId;
     upsertDeviceStatus(deviceId, {
       online: true,
+      customName: profile.customName || "",
+      displayName: profile.customName || deviceId,
       appState: payload?.appState || null,
       meta: payload?.meta || null,
       lastError: null,
@@ -386,10 +414,13 @@ io.on("connection", (socket) => {
   socket.on("device-error", (payload) => {
     const deviceId = String(payload?.deviceId || socketToDevice[socket.id] || "").trim();
     if (!deviceId) return;
+    const profile = ensureProfile(deviceId) || { customName: "" };
     connectedDevices[deviceId] = socket.id;
     socketToDevice[socket.id] = deviceId;
     upsertDeviceStatus(deviceId, {
       online: true,
+      customName: profile.customName || "",
+      displayName: profile.customName || deviceId,
       lastError: payload?.message || payload?.error || "Unknown device error",
       lastErrorAt: nowIso(),
       errorType: payload?.type || "runtime",
@@ -424,17 +455,39 @@ io.on("connection", (socket) => {
 // Connected device IDs
 app.get("/devices", (req, res) => {
   if (!isApiAuthed(req)) return res.status(401).json({ ok: false, error: "unauthorized" });
-  res.json(Object.keys(connectedDevices));
+  res.json({
+    devices: listDevicesWithProfiles(deviceStatus, connectedDevices),
+    groups: listGroups(),
+  });
 });
 
 // Live health/error status for CMS
 app.get("/device-status", (req, res) => {
   if (!isApiAuthed(req)) return res.status(401).json({ ok: false, error: "unauthorized" });
-  const list = Object.values(deviceStatus)
-    .map((item) => ({
-      ...item,
-      online: !!connectedDevices[item.deviceId],
-    }))
+  const devices = listDevicesWithProfiles(deviceStatus, connectedDevices);
+  const statusMap = new Map(Object.values(deviceStatus).map((item) => [item.deviceId, item]));
+  const list = devices
+    .map((profile) => {
+      const item = statusMap.get(profile.deviceId) || {
+        deviceId: profile.deviceId,
+        lastSeen: null,
+        lastError: null,
+        lastErrorAt: null,
+        lastDisconnectReason: null,
+        lastDisconnectAt: null,
+        appState: null,
+        meta: null,
+        recentEvents: [],
+      };
+      return {
+        ...item,
+        customName: profile.customName || "",
+        displayName: profile.displayName || item.deviceId,
+        groups: profile.groupNames || [],
+        groupIds: profile.groupIds || [],
+        online: !!connectedDevices[profile.deviceId],
+      };
+    })
     .sort((a, b) => {
       if (a.online !== b.online) return a.online ? -1 : 1;
       const aTs = Date.parse(a.lastErrorAt || a.lastSeen || 0);
@@ -443,6 +496,60 @@ app.get("/device-status", (req, res) => {
     });
 
   res.json(list);
+});
+
+app.post("/devices/:deviceId/rename", requireCmsAuth, (req, res) => {
+  const deviceId = sanitizeDeviceId(req.params?.deviceId);
+  if (!deviceId) {
+    return res.status(400).json({ ok: false, error: "invalid-device-id" });
+  }
+  const updated = renameDevice(deviceId, req.body?.customName || "");
+  if (!updated) {
+    return res.status(400).json({ ok: false, error: "rename-failed" });
+  }
+  upsertDeviceStatus(deviceId, {
+    customName: updated.customName || "",
+    displayName: updated.customName || deviceId,
+  });
+  return res.json({ ok: true, profile: updated });
+});
+
+app.post("/device-groups", requireCmsAuth, (req, res) => {
+  const group = createGroup(req.body?.name || "");
+  return res.json({ ok: true, group });
+});
+
+app.put("/device-groups/:groupId", requireCmsAuth, (req, res) => {
+  const group = updateGroup(req.params?.groupId, {
+    name: req.body?.name || "",
+    deviceIds: Array.isArray(req.body?.deviceIds) ? req.body.deviceIds : [],
+  });
+  if (!group) {
+    return res.status(404).json({ ok: false, error: "group-not-found" });
+  }
+  for (const deviceId of Object.keys(deviceStatus)) {
+    const status = deviceStatus[deviceId];
+    upsertDeviceStatus(deviceId, {
+      customName: status?.customName || "",
+      displayName: status?.displayName || deviceId,
+    });
+  }
+  return res.json({ ok: true, group });
+});
+
+app.delete("/device-groups/:groupId", requireCmsAuth, (req, res) => {
+  const ok = deleteGroup(req.params?.groupId);
+  if (!ok) {
+    return res.status(404).json({ ok: false, error: "group-not-found" });
+  }
+  Object.keys(deviceStatus).forEach((deviceId) => {
+    const status = deviceStatus[deviceId];
+    upsertDeviceStatus(deviceId, {
+      customName: status?.customName || "",
+      displayName: status?.displayName || deviceId,
+    });
+  });
+  return res.json({ ok: true });
 });
 
 // Get active local IP
