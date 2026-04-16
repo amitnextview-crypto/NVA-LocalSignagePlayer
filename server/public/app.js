@@ -1938,11 +1938,12 @@ function renderUploadSections() {
   container.innerHTML = "";
 
   const count = sectionCount(layout);
+  const panels = [];
 
   for (let i = 1; i <= count; i++) {
-    container.innerHTML += `
-      <div>
-        <h3>Section ${i}</h3>
+    panels.push(`
+      <div class="section-panel upload-section-panel">
+        <h4>Section ${i}</h4>
         <div class="source-controls">
           <label>Source Type</label>
           <select id="sourceType${i}" onchange="onSectionSourceChange(${i})">
@@ -1970,7 +1971,12 @@ function renderUploadSections() {
           <button class="btn primary" onclick="uploadMedia(${i})">Upload Section ${i}</button>
         </div>
       </div>
-    `;
+    `);
+  }
+
+  container.innerHTML = `<div class="section-controls-row upload-sections-row">${panels.join("")}</div>`;
+
+  for (let i = 1; i <= count; i++) {
     updateSectionUploadMode(i);
   }
 }

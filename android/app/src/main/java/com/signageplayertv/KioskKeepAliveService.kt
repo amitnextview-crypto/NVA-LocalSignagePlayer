@@ -106,26 +106,17 @@ class KioskKeepAliveService : Service() {
 
   private fun startWatchdog() {
     handler.removeCallbacks(watchdog)
-    handler.postDelayed(watchdog, WATCHDOG_INTERVAL_MS)
+    handler.post(watchdog)
   }
 
   private fun scheduleReopen() {
     if (!isAutoReopenEnabled()) return
 
-    val pendingIntent = buildReopenPendingIntent()
-
     val alarmManager = getSystemService(Context.ALARM_SERVICE) as AlarmManager
     val triggerAt = System.currentTimeMillis() + WATCHDOG_INTERVAL_MS
 
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-      alarmManager.setExactAndAllowWhileIdle(
-        AlarmManager.RTC_WAKEUP,
-        triggerAt,
-        pendingIntent
-      )
-    } else {
-      alarmManager.setExact(AlarmManager.RTC_WAKEUP, triggerAt, pendingIntent)
-    }
+    scheduleAlarm(alarmManager, buildReopenPendingIntent(), triggerAt)
+    scheduleAlarm(alarmManager, buildReopenBroadcastPendingIntent(), triggerAt)
   }
 
   private fun tryLaunchApp() {
@@ -152,6 +143,43 @@ class KioskKeepAliveService : Service() {
       intent,
       PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
     )
+  }
+
+  private fun buildReopenBroadcastPendingIntent(): PendingIntent {
+    val intent = Intent(this, ReopenReceiver::class.java).apply {
+      action = ReopenReceiver.ACTION_FORCE_REOPEN
+      `package` = packageName
+    }
+    return PendingIntent.getBroadcast(
+      this,
+      REOPEN_REQ_CODE + 1,
+      intent,
+      PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+    )
+  }
+
+  private fun scheduleAlarm(
+    alarmManager: AlarmManager,
+    pendingIntent: PendingIntent,
+    triggerAt: Long
+  ) {
+    try {
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+        alarmManager.setExactAndAllowWhileIdle(
+          AlarmManager.RTC_WAKEUP,
+          triggerAt,
+          pendingIntent
+        )
+      } else {
+        alarmManager.setExact(AlarmManager.RTC_WAKEUP, triggerAt, pendingIntent)
+      }
+    } catch (_: Exception) {
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+        alarmManager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pendingIntent)
+      } else {
+        alarmManager.set(AlarmManager.RTC_WAKEUP, triggerAt, pendingIntent)
+      }
+    }
   }
 
   private fun isAppInForeground(): Boolean {

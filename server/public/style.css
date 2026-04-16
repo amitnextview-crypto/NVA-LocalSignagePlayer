@@ -361,6 +361,9 @@ h3 {
   display: grid;
   gap: 8px;
   margin-top: 10px;
+  max-height: 236px;
+  overflow-y: auto;
+  padding-right: 4px;
 }
 
 .device-check-item,
@@ -815,47 +818,42 @@ input[type="range"] {
   margin-bottom: 8px;
 }
 
+.upload-sections-row {
+  margin-top: 8px;
+}
+
+.upload-section-panel h4 {
+  margin: 0 0 8px;
+  font-size: 13px;
+  color: #eff8ff;
+}
+
 .hidden {
   display: none !important;
 }
 
 #uploadSections > div {
-  padding: 9px;
-  border: 1px solid rgba(130, 196, 237, 0.2);
-  border-radius: 12px;
-  margin-bottom: 12px;
-  background: rgba(255, 255, 255, 0.04);
-}
-
-#uploadSections h3 {
-  margin: 0 0 6px;
-}
-
-#uploadSections button {
-  margin-top: 6px;
+  margin-bottom: 0;
 }
 
 .upload-row {
-  display: flex;
-  align-items: center;
+  display: grid;
   gap: 8px;
-  flex-wrap: nowrap;
+  margin-top: 2px;
 }
 
 .upload-row input[type="file"] {
-  flex: 1;
   min-width: 0;
 }
 
 .upload-row button {
   margin-top: 0 !important;
-  white-space: nowrap;
-  flex-shrink: 0;
+  width: 100%;
 }
 
 .source-controls {
   display: grid;
-  grid-template-columns: 92px 1fr;
+  grid-template-columns: 1fr;
   gap: 8px;
   align-items: center;
   margin-bottom: 8px;
@@ -863,6 +861,7 @@ input[type="range"] {
 
 .source-controls label {
   margin: 0;
+  display: block;
 }
 
 .source-url-input {
@@ -901,6 +900,10 @@ input[type="range"] {
 
 .compact-card {
   margin-bottom: 10px;
+}
+
+.app-update-card {
+  margin-top: 0;
 }
 
 .settings-card {

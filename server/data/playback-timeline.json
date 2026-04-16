@@ -3,23 +3,41 @@
     "sections": {
       "1": {
         "section": 1,
-        "cycleId": "1-1776342293357_ssf4mv",
-        "syncAt": 1776342296514,
-        "updatedAt": 1776342293481,
+        "cycleId": "1-1776343283336_cr067p",
+        "syncAt": 1776343286463,
+        "updatedAt": 1776343283461,
         "fileCount": 1,
-        "mediaSignature": "0_Motivational_Inspiration_1080x1920.mp4",
-        "targetDevice": "all"
-      },
-      "2": {
-        "section": 2,
-        "cycleId": "2-1776342219577_m5qwx0",
-        "syncAt": 1776342222873,
-        "updatedAt": 1776342219859,
-        "fileCount": 1,
-        "mediaSignature": "1d5b0ab3-8e47-4827-857d-d754f15ae422.jpg",
+        "mediaSignature": "WhatsApp_Video_2025-09-19_at_14.23.37.mp4",
         "targetDevice": "all"
       }
     }
   },
-  "devices": {}
+  "devices": {
+    "ef120b3e69833156": {
+      "sections": {
+        "1": {
+          "section": 1,
+          "cycleId": "1-1776343303907_298avf",
+          "syncAt": 1776343307044,
+          "updatedAt": 1776343304040,
+          "fileCount": 1,
+          "mediaSignature": "0_Motivational_Inspiration_1080x1920.mp4",
+          "targetDevice": "ef120b3e69833156"
+        }
+      }
+    },
+    "65d6c2b9977689bc": {
+      "sections": {
+        "1": {
+          "section": 1,
+          "cycleId": "1-1776343381924_u8ptoe",
+          "syncAt": 1776343385067,
+          "updatedAt": 1776343382065,
+          "fileCount": 0,
+          "mediaSignature": "",
+          "targetDevice": "65d6c2b9977689bc"
+        }
+      }
+    }
+  }
 }

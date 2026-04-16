@@ -1,6 +1,6 @@
 {
   "orientation": "horizontal",
-  "layout": "grid2",
+  "layout": "fullscreen",
   "grid3Layout": "stack-h",
   "gridRatio": "1:1",
   "slideDuration": 5,
@@ -29,7 +29,7 @@
   "ticker": {
     "text": "Breaking News: NextView Premium Product New Update Available!",
     "color": "#ffffff",
-    "bgColor": "#a21515",
+    "bgColor": "#e62828",
     "speed": 6,
     "fontSize": 24,
     "position": "bottom"

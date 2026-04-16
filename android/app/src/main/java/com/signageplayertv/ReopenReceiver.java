@@ -7,6 +7,7 @@ import android.content.SharedPreferences;
 import android.util.Log;
 
 public class ReopenReceiver extends BroadcastReceiver {
+    public static final String ACTION_FORCE_REOPEN = "com.signageplayertv.action.FORCE_REOPEN";
     private static final String PREFS_NAME = "kiosk_prefs";
     private static final String KEY_AUTO_REOPEN_ENABLED = "auto_reopen_enabled";
 
@@ -22,9 +23,15 @@ public class ReopenReceiver extends BroadcastReceiver {
 
             Intent launchIntent = new Intent(context, MainActivity.class);
             launchIntent.setAction(Intent.ACTION_MAIN);
+            launchIntent.addCategory(Intent.CATEGORY_HOME);
+            launchIntent.addCategory(Intent.CATEGORY_DEFAULT);
             launchIntent.addCategory(Intent.CATEGORY_LEANBACK_LAUNCHER);
             launchIntent.addCategory(Intent.CATEGORY_LAUNCHER);
-            launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+            launchIntent.addFlags(
+                    Intent.FLAG_ACTIVITY_NEW_TASK
+                            | Intent.FLAG_ACTIVITY_CLEAR_TOP
+                            | Intent.FLAG_ACTIVITY_SINGLE_TOP
+            );
 
             try {
                 android.app.PendingIntent pendingIntent = android.app.PendingIntent.getActivity(
