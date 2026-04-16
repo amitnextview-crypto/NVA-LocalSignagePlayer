@@ -3,19 +3,19 @@
 #endif
 
 #ifndef OutputBaseName
-#define OutputBaseName "NVA-SignagePlayerTV-Setup"
+#define OutputBaseName "NVAPlayerPC-Setup"
 #endif
 
 [Setup]
 AppId={{8E6F9941-2FE4-49A6-8A99-ED6E0101D0AB}
-AppName=Signage CMS
+AppName=NVAPlayerPC
 AppVersion={#AppVersion}
-AppPublisher=SignagePlayerTV
+AppPublisher=NVAPlayerPC
 AppPublisherURL=https://signageplayertv.local
 AppSupportURL=https://signageplayertv.local
 AppUpdatesURL=https://signageplayertv.local
-DefaultDirName={localappdata}\NVA SignagePlayerTV
-DefaultGroupName=NVA SignagePlayerTV
+DefaultDirName={localappdata}\NVAPlayerPC
+DefaultGroupName=NVAPlayerPC
 OutputDir=output
 OutputBaseFilename={#OutputBaseName}
 Compression=lzma
@@ -32,31 +32,31 @@ DiskSpanning=no
 
 [Tasks]
 Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Additional shortcuts:"
-Name: "startup"; Description: "Start Signage CMS when Windows starts"; GroupDescription: "Startup options:"; Flags: checkedonce
+Name: "startup"; Description: "Start NVAPlayerPC when Windows starts"; GroupDescription: "Startup options:"; Flags: checkedonce
 
 [Files]
-Source: "..\NVA-SignagePlayerTV.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\NVAPlayerPC.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "assets\nvlogo.ico"; DestDir: "{app}"; Flags: ignoreversion
-Source: "..\..\android\app\build\outputs\apk\release\NVA-SignagePlayerTV.apk"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
+Source: "..\..\android\app\build\outputs\apk\release\NVAPlayerPC.apk"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
 
 [Icons]
-Name: "{autodesktop}\NVA SignagePlayerTV"; Filename: "{app}\NVA-SignagePlayerTV.exe"; IconFilename: "{app}\nvlogo.ico"; Tasks: desktopicon
-Name: "{userstartup}\NVA SignagePlayerTV"; Filename: "{app}\NVA-SignagePlayerTV.exe"; IconFilename: "{app}\nvlogo.ico"; Tasks: startup
-Name: "{group}\NVA SignagePlayerTV"; Filename: "{app}\NVA-SignagePlayerTV.exe"; IconFilename: "{app}\nvlogo.ico"
-Name: "{group}\Uninstall NVA SignagePlayerTV"; Filename: "{uninstallexe}"
+Name: "{autodesktop}\NVAPlayerPC"; Filename: "{app}\NVAPlayerPC.exe"; IconFilename: "{app}\nvlogo.ico"; Tasks: desktopicon
+Name: "{userstartup}\NVAPlayerPC"; Filename: "{app}\NVAPlayerPC.exe"; IconFilename: "{app}\nvlogo.ico"; Tasks: startup
+Name: "{group}\NVAPlayerPC"; Filename: "{app}\NVAPlayerPC.exe"; IconFilename: "{app}\nvlogo.ico"
+Name: "{group}\Uninstall NVAPlayerPC"; Filename: "{uninstallexe}"
 
 [Run]
-Filename: "{cmd}"; Parameters: "/C taskkill /F /IM NVA-SignagePlayerTV.exe /T >nul 2>&1"; Flags: runhidden
-Filename: "{cmd}"; Parameters: "/C netsh advfirewall firewall delete rule name=""NVA SignagePlayerTV CMS"" >nul 2>&1"; Flags: runhidden waituntilterminated; Check: IsAdminInstallMode
-Filename: "{cmd}"; Parameters: "/C netsh advfirewall firewall delete rule name=""NVA SignagePlayerTV CMS Port 8080"" >nul 2>&1"; Flags: runhidden waituntilterminated; Check: IsAdminInstallMode
-Filename: "{cmd}"; Parameters: "/C netsh advfirewall firewall add rule name=""NVA SignagePlayerTV CMS"" dir=in action=allow program=""{app}\NVA-SignagePlayerTV.exe"" enable=yes profile=any"; Flags: runhidden waituntilterminated; Check: IsAdminInstallMode
-Filename: "{cmd}"; Parameters: "/C netsh advfirewall firewall add rule name=""NVA SignagePlayerTV CMS Port 8080"" dir=in action=allow protocol=TCP localport=8080 enable=yes profile=any"; Flags: runhidden waituntilterminated; Check: IsAdminInstallMode
-Filename: "{app}\NVA-SignagePlayerTV.exe"; Description: "Launch NVA SignagePlayerTV now"; Flags: nowait postinstall skipifsilent
+Filename: "{cmd}"; Parameters: "/C taskkill /F /IM NVAPlayerPC.exe /T >nul 2>&1"; Flags: runhidden
+Filename: "{cmd}"; Parameters: "/C netsh advfirewall firewall delete rule name=""NVAPlayerPC CMS"" >nul 2>&1"; Flags: runhidden waituntilterminated; Check: IsAdminInstallMode
+Filename: "{cmd}"; Parameters: "/C netsh advfirewall firewall delete rule name=""NVAPlayerPC CMS Port 8080"" >nul 2>&1"; Flags: runhidden waituntilterminated; Check: IsAdminInstallMode
+Filename: "{cmd}"; Parameters: "/C netsh advfirewall firewall add rule name=""NVAPlayerPC CMS"" dir=in action=allow program=""{app}\NVAPlayerPC.exe"" enable=yes profile=any"; Flags: runhidden waituntilterminated; Check: IsAdminInstallMode
+Filename: "{cmd}"; Parameters: "/C netsh advfirewall firewall add rule name=""NVAPlayerPC CMS Port 8080"" dir=in action=allow protocol=TCP localport=8080 enable=yes profile=any"; Flags: runhidden waituntilterminated; Check: IsAdminInstallMode
+Filename: "{app}\NVAPlayerPC.exe"; Description: "Launch NVAPlayerPC now"; Flags: nowait postinstall skipifsilent
 
 [UninstallRun]
-Filename: "{cmd}"; Parameters: "/C taskkill /F /IM NVA-SignagePlayerTV.exe /T >nul 2>&1"; Flags: runhidden
-Filename: "{cmd}"; Parameters: "/C netsh advfirewall firewall delete rule name=""NVA SignagePlayerTV CMS"" >nul 2>&1"; Flags: runhidden waituntilterminated
-Filename: "{cmd}"; Parameters: "/C netsh advfirewall firewall delete rule name=""NVA SignagePlayerTV CMS Port 8080"" >nul 2>&1"; Flags: runhidden waituntilterminated
+Filename: "{cmd}"; Parameters: "/C taskkill /F /IM NVAPlayerPC.exe /T >nul 2>&1"; Flags: runhidden
+Filename: "{cmd}"; Parameters: "/C netsh advfirewall firewall delete rule name=""NVAPlayerPC CMS"" >nul 2>&1"; Flags: runhidden waituntilterminated
+Filename: "{cmd}"; Parameters: "/C netsh advfirewall firewall delete rule name=""NVAPlayerPC CMS Port 8080"" >nul 2>&1"; Flags: runhidden waituntilterminated
 
 [Code]
 const
@@ -81,10 +81,10 @@ function InitializeSetup(): Boolean;
 var
   ResultCode: Integer;
 begin
-  Exec(ExpandConstant('{cmd}'), '/C taskkill /F /IM NVA-SignagePlayerTV.exe /T >nul 2>&1', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Exec(ExpandConstant('{cmd}'), '/C taskkill /F /IM NVAPlayerPC.exe /T >nul 2>&1', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   if not HasEnoughDiskSpace() then begin
     SuppressibleMsgBox(
-      'Signage CMS install karne ke liye kam se kam ' + FormatMb(MinFreeSpaceMB) + ' free disk space chahiye in Local App Data.' + #13#10#13#10 +
+      'NVAPlayerPC install karne ke liye kam se kam ' + FormatMb(MinFreeSpaceMB) + ' free disk space chahiye in Local App Data.' + #13#10#13#10 +
       'Please thoda disk space free karke installer dubara run karein.',
       mbCriticalError,
       MB_OK,
@@ -100,7 +100,7 @@ procedure CurStepChanged(CurStep: TSetupStep);
 begin
   if CurStep = ssPostInstall then begin
     if IsAdminInstallMode then begin
-      Log('Firewall rules configured for NVA SignagePlayerTV CMS.');
+      Log('Firewall rules configured for NVAPlayerPC CMS.');
     end else begin
       SuppressibleMsgBox(
         'The installer was not run in admin mode, so firewall rules were not configured automatically.' + #13#10#13#10 +

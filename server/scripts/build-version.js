@@ -37,7 +37,7 @@ function resolvePkgCommand(serverDir) {
 
 function buildExe(serverDir, version) {
   const { command, args } = resolvePkgCommand(serverDir);
-  const outputName = "NVA-SignagePlayerTV.exe";
+  const outputName = "NVAPlayerPC.exe";
   const result = spawnSync(
     command,
     [...args, ".", "--targets", "node18-win-x64", "--output", outputName],

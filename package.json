@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "android": "react-native run-android",
+    "android:win": "powershell -ExecutionPolicy Bypass -File scripts/run-android-shortpath.ps1",
     "ios": "react-native run-ios",
     "lint": "eslint .",
     "start": "react-native start",

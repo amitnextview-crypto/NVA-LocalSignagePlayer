@@ -34,7 +34,12 @@ import {
   setPrioritySection,
   syncMedia,
 } from "../services/mediaService";
-import { findCMS, getServer, restoreServerFromStorage } from "../services/serverService";
+import {
+  findCMS,
+  getServer,
+  restoreServerFromStorage,
+  setServer,
+} from "../services/serverService";
 
 let socket: Socket | null = null;
 const WATCHDOG_INTERVAL_MS = 5000;
@@ -44,7 +49,7 @@ const NETWORK_QUALITY_CHECK_INTERVAL_MS = 15000;
 const NETWORK_QUALITY_SLOW_MS = 1800;
 const NETWORK_QUALITY_VERY_SLOW_MS = 3500;
 const SELF_HEAL_SYNC_INTERVAL_MS = 120000;
-const RECONNECT_RETRY_INTERVAL_MS = 10000;
+const RECONNECT_RETRY_INTERVAL_MS = 3000;
 const ENABLE_AUTO_WIFI_RECOVERY = false;
 const ENABLE_NETWORK_RECOVERY_LOOP = false;
 const OFFLINE_NOTICE_POLL_MS = 3000;
@@ -172,6 +177,7 @@ export default function App() {
     visible: false,
   });
   const socketUrlRef = useRef("");
+  const initAttemptIdRef = useRef(0);
   const playbackBySectionRef = useRef<Record<number, any>>({});
   const lastMetaRef = useRef<any | null>(null);
   const lastConfigSyncAtRef = useRef("");
@@ -966,13 +972,14 @@ export default function App() {
           if (
             socket &&
             !socket.connected &&
-            reconnectMissCount <= 2 &&
+            reconnectMissCount <= 3 &&
             (!preferredUrl || preferredUrl === socketUrlRef.current)
           ) {
             socket.connect();
             return;
           }
-          const discoveredUrl = preferredUrl || (await findCMS());
+          const discoveredUrl =
+            reconnectMissCount <= 2 && preferredUrl ? preferredUrl : await findCMS();
           if (
             discoveredUrl &&
             socket &&
@@ -980,7 +987,7 @@ export default function App() {
             discoveredUrl !== socketUrlRef.current
           ) {
             resetSocketConnection();
-          } else if (socket && reconnectMissCount >= 3) {
+          } else if (socket && reconnectMissCount >= 4) {
             resetSocketConnection();
           }
         } catch {
@@ -1135,6 +1142,8 @@ export default function App() {
     const init = async () => {
       if (initInProgress) return;
       initInProgress = true;
+      const attemptId = Date.now();
+      initAttemptIdRef.current = attemptId;
       try {
         await restoreServerFromStorage();
         const restoredServer = getServer();
@@ -1187,15 +1196,32 @@ export default function App() {
           "Connecting to server"
         );
 
+        if (socket && socketUrlRef.current === url) {
+          socket.connect();
+          return;
+        }
+
+        if (socket) {
+          resetSocketConnection();
+        }
+
         socket = io(url, {
-          transports: ["websocket"],
+          transports: ["polling", "websocket"],
+          upgrade: true,
+          rememberUpgrade: true,
+          autoConnect: true,
+          forceNew: true,
           reconnection: true,
           reconnectionAttempts: Infinity,
-          reconnectionDelay: 3000,
+          reconnectionDelay: 1000,
+          reconnectionDelayMax: 2500,
+          randomizationFactor: 0.2,
+          timeout: 8000,
         });
         socketUrlRef.current = url;
 
         socket.on("connect", async () => {
+          if (initAttemptIdRef.current !== attemptId) return;
           if (offlineNoticeRef.current) {
             setOfflineNotice("");
           }
@@ -1204,6 +1230,7 @@ export default function App() {
           console.log("Connected:", deviceId);
           stopReconnectLoop();
           clearDisconnectRecovery();
+          await setServer(url);
           socket?.emit("register-device", deviceId);
           await emitDeviceHealthSnapshot("connected", { phase: "socket-connected" }, { forceStorageScan: true });
           setConnectTexts("Connected. Downloading device configuration", "Syncing config");
@@ -1470,6 +1497,7 @@ export default function App() {
           }
         });
         socket.on("disconnect", (reason) => {
+          if (initAttemptIdRef.current !== attemptId) return;
           pushDiagnosticEvent("socket", `Disconnected: ${String(reason)}`);
           setConnectTexts(
             `Connection lost (${String(reason)}). Continuing cached playback`,
@@ -1480,6 +1508,7 @@ export default function App() {
           startDisconnectRecovery(`disconnect:${String(reason)}`);
         });
         socket.on("connect_error", (err) => {
+          if (initAttemptIdRef.current !== attemptId) return;
           pushDiagnosticEvent("socket", `Connect error: ${String(err?.message || "unknown")}`);
           if (ENABLE_NETWORK_RECOVERY_LOOP) checkAndRecoverNetwork();
           setConnectTexts(

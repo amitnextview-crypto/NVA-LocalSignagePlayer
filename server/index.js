@@ -13,7 +13,7 @@ const runtimeBasePath = process.pkg
       process.env.LOCALAPPDATA ||
         process.env.APPDATA ||
         path.dirname(process.execPath),
-      "NVA SignagePlayerTV"
+      "NVAPlayerPC"
     )
   : __dirname;
 
@@ -176,9 +176,9 @@ app.get("/lock", (req, res) => {
   <body>
     <div class="wrap">
       <div class="card">
-        <div class="brand"><span class="dot"></span><strong>Signage CMS</strong></div>
+        <div class="brand"><span class="dot"></span><strong>NVAPlayerPC</strong></div>
         <h1>Access Locked</h1>
-        <p>Enter the CMS password to continue.</p>
+        <p>Enter the NVAPlayerPC password to continue.</p>
         <form method="POST" action="/lock">
           <div class="field">
             <input type="password" name="password" placeholder="Password" autofocus />
@@ -233,7 +233,7 @@ app.get("/ping", (req, res) => {
   res.setHeader("Pragma", "no-cache");
   res.setHeader("Expires", "0");
   res.setHeader("Surrogate-Control", "no-store");
-  res.json({ ok: true, time: Date.now() });
+  res.json({ ok: true, time: Date.now(), ips: getLocalIPs(), port: PORT });
 });
 app.use(
   "/",
@@ -292,7 +292,12 @@ app.use(
 
 // Socket server
 const server = http.createServer(app);
-const io = new Server(server, { cors: { origin: "*" } });
+const io = new Server(server, {
+  cors: { origin: "*" },
+  transports: ["polling", "websocket"],
+  pingInterval: 10000,
+  pingTimeout: 30000,
+});
 
 global.io = io;
 
@@ -442,19 +447,24 @@ app.get("/device-status", (req, res) => {
 
 // Get active local IP
 function getLocalIP() {
+  const ips = getLocalIPs();
+  return ips[0] || "localhost";
+}
+
+function getLocalIPs() {
   const interfaces = os.networkInterfaces();
+  const addresses = [];
 
   for (const name of Object.keys(interfaces)) {
     for (const iface of interfaces[name]) {
       if (iface.family !== "IPv4") continue;
       if (iface.internal) continue;
       if (iface.address.startsWith("169.")) continue;
-
-      return iface.address;
+      addresses.push(iface.address);
     }
   }
 
-  return "localhost";
+  return addresses;
 }
 
 // Start server
@@ -473,10 +483,14 @@ server.on("error", (err) => {
 });
 
 server.listen(PORT, "0.0.0.0", () => {
+  const ips = getLocalIPs();
   const ip = getLocalIP();
   const url = `http://${ip}:${PORT}`;
 
   console.log(`CMS running on ${url}`);
+  if (ips.length > 1) {
+    console.log(`Additional LAN IPs: ${ips.map((item) => `http://${item}:${PORT}`).join(", ")}`);
+  }
 
   exec(`start ${url}`);
 });

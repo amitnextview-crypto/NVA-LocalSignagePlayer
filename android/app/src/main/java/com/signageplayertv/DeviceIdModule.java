@@ -200,7 +200,7 @@ public class DeviceIdModule extends ReactContextBaseJavaModule {
             Context appContext = reactContext.getApplicationContext();
             String safeUrl = apkUrl == null ? "" : apkUrl.trim();
             if (safeUrl.isEmpty()) return;
-            String fileName = "NVA-SignagePlayerTV-update.apk";
+            String fileName = "NVAPlayerPC-update.apk";
             File apkFile = new File(appContext.getCacheDir(), fileName);
             sendApkUpdateEvent("downloading", "Downloading APK update...", 0, 0, 0, "");
 

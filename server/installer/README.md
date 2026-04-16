@@ -1,4 +1,4 @@
-# Signage CMS Windows Installer
+# NVAPlayerPC Windows Installer
 
 ## Prerequisites (builder machine only)
 - Node.js (to build server EXE)
@@ -14,8 +14,8 @@ npm run build:installer
 ```
 
 ## Output
-- EXE server: `server\NVA-SignagePlayerTV.exe`
-- Installer: `server\installer\output\NVA-SignagePlayerTV-Setup.exe`
+- EXE server: `server\NVAPlayerPC.exe`
+- Installer: `server\installer\output\NVAPlayerPC-Setup.exe`
 
 ## Branding
 - Installer icon is auto-generated from:
@@ -24,7 +24,7 @@ npm run build:installer
   - `server\installer\assets\nvlogo.ico`
 
 ## Notes
-- Installer includes `NVA-SignagePlayerTV.exe`.
+- Installer includes `NVAPlayerPC.exe`.
 - If present, it also includes Android APK from:
-  - `android\app\build\outputs\apk\release\NVA-SignagePlayerTV.apk`
+  - `android\app\build\outputs\apk\release\NVAPlayerPC.apk`
 - Customer machine does **not** need Node.js.

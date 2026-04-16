@@ -122,7 +122,7 @@ const appUpdateUpload = multer({
     filename: (_req, file, cb) => {
       const ext = path.extname(file.originalname || "").toLowerCase();
       const safeExt = ext === ".apk" ? ".apk" : ".bin";
-      cb(null, `NVA-SignagePlayerTV-update${safeExt}`);
+      cb(null, `NVAPlayerPC-update${safeExt}`);
     },
   }),
   limits: { fileSize: 2 * 1024 * 1024 * 1024 },

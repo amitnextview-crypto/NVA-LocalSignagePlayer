@@ -3,7 +3,7 @@ $ErrorActionPreference = "Stop"
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $serverDir = Split-Path -Parent $scriptDir
 $issFile = Join-Path $scriptDir "SignageCMS.iss"
-$exeFile = Join-Path $serverDir "NVA-SignagePlayerTV.exe"
+$exeFile = Join-Path $serverDir "NVAPlayerPC.exe"
 $assetsDir = Join-Path $scriptDir "assets"
 $logoPng = Join-Path $serverDir "public\nvlogo.png"
 $logoIco = Join-Path $assetsDir "nvlogo.ico"
@@ -30,11 +30,11 @@ function Get-BuildVersion {
 }
 
 if (!(Test-Path $exeFile)) {
-  throw "NVA-SignagePlayerTV.exe not found. Run: npm run build (inside server folder)"
+  throw "NVAPlayerPC.exe not found. Run: npm run build (inside server folder)"
 }
 
 $appVersion = Get-BuildVersion -MetaPath $buildMetaPath
-$outputBaseName = "NVA-SignagePlayerTV-Setup"
+$outputBaseName = "NVAPlayerPC-Setup"
 
 if (!(Test-Path $logoPng)) {
   throw "Logo not found: $logoPng"

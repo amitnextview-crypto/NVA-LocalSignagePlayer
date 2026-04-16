@@ -1773,81 +1773,6 @@ function selectDeviceFromDashboard(deviceId) {
   select.value = deviceId;
   loadConfig();
   renderHealthSummary(latestDeviceStatusList);
-  renderDeviceAlerts(latestDeviceStatusList);
-}
-
-function renderDeviceAlerts(statusList) {
-  const box = document.getElementById("deviceAlertsList");
-  if (!box) return;
-
-  const selectedDevice = document.getElementById("deviceSelect")?.value || "all";
-  const filtered = selectedDevice === "all"
-    ? statusList
-    : statusList.filter((s) => s.deviceId === selectedDevice);
-
-  if (!filtered.length) {
-    box.innerHTML = `<div class="alerts-empty">No device alerts yet.</div>`;
-    return;
-  }
-
-  box.innerHTML = filtered
-    .map((item) => {
-      const online = !!item.online;
-      const hasError = !!item.lastError;
-      const offline = !online;
-      const stateClass = online ? "online" : hasError ? "error" : "offline";
-      const stateText = online ? "Online" : hasError ? "Error" : "Offline";
-      const cardClass = online ? "" : hasError ? "error" : "offline";
-
-      const details = [
-        `Last Seen: ${formatStatusTime(item.lastSeen)}`,
-      ];
-      if (item.lastDisconnectAt) {
-        details.push(
-          `Disconnected: ${formatStatusTime(item.lastDisconnectAt)} (${item.lastDisconnectReason || "unknown"})`
-        );
-      }
-      if (item.lastErrorAt) {
-        details.push(`Error At: ${formatStatusTime(item.lastErrorAt)}`);
-      }
-      if (item.lastError) {
-        details.push(`Error: ${item.lastError}`);
-      }
-      if (item.meta?.appVersion) {
-        details.push(`App Version: ${item.meta.appVersion}`);
-      }
-      if (item.meta && (item.meta.totalBytes || item.meta.freeBytes)) {
-        details.push(
-          `Storage: ${formatMetaStorage(item.meta.freeBytes, item.meta.totalBytes)}`
-        );
-      }
-      if (item.meta) {
-        details.push(
-          `App Data: media ${formatBytes(item.meta.mediaBytes || 0)}, config ${formatBytes(
-            item.meta.configBytes || 0
-          )}, cache ${formatBytes(item.meta.cacheBytes || 0)}`
-        );
-      }
-      if (item.meta?.server) {
-        details.push(`CMS: ${item.meta.server}`);
-      }
-      if (item.meta?.apkUpdate?.status === "success") {
-        const previousVersion = item.meta?.apkUpdate?.previousVersion || "-";
-        const currentVersion = item.meta?.apkUpdate?.currentVersion || item.meta?.appVersion || "-";
-        details.push(`APK Updated: ${previousVersion} -> ${currentVersion}`);
-      }
-
-      return `
-        <div class="alert-item ${cardClass}">
-          <div class="alert-head">
-            <div class="alert-device">${item.deviceId}</div>
-            <div class="alert-state ${stateClass}">${stateText}</div>
-          </div>
-          <div class="alert-meta">${details.join("<br/>")}</div>
-        </div>
-      `;
-    })
-    .join("");
 }
 
 function showApkUpdateSuccessNotices(statusList) {
@@ -1889,13 +1814,8 @@ async function loadDeviceAlerts() {
     window.__latestDeviceStatusList = latestDeviceStatusList;
     showApkUpdateSuccessNotices(latestDeviceStatusList);
     renderHealthSummary(latestDeviceStatusList);
-    renderDeviceAlerts(latestDeviceStatusList);
     renderScreenPreview();
   } catch (_e) {
-    const box = document.getElementById("deviceAlertsList");
-    if (box) {
-      box.innerHTML = `<div class="alerts-empty">Unable to load device alerts.</div>`;
-    }
     window.__latestDeviceStatusList = [];
     renderHealthSummary([]);
     renderScreenPreview();

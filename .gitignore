@@ -32,6 +32,13 @@ local.properties
 *.hprof
 .cxx/
 *.keystore
+*.jks
+*.p12
+*.pfx
+*.pem
+*.key
+*.cer
+*.crt
 !debug.keystore
 .kotlin/
 
@@ -78,10 +85,15 @@ yarn-error.log
 # Environment files
 .env
 .env.*
+!.env.example
 
 # Logs
 *.log
 logs/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
 
 # React Native / Expo cache
 .expo/
@@ -91,20 +103,33 @@ logs/
 *.exe
 *.apk
 *.aab
+*.msi
+*.appx
+*.appxbundle
 server/installer/output/
 
 # Runtime uploads
 server/uploads/
 server/installer/build-meta.json
+server/public/uploads/
+server/data/*.local.json
+server/data/device-status.json
+server/data/playback-timeline.json
 
 # Android build folders
 android/app/build/
 android/build/
+android/.cxx/
 
 # VS Code
 .vscode/
 server/data/configs/
-server/uploads/
 server/data/device-groups.json
 .gradle-local/
-.gradle-local/
+android/.gradle-local/
+
+# Local temp/work folders
+.tmp-*/
+_tmp_*/
+.android-local/
+.bundle/
