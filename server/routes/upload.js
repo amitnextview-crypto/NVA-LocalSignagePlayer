@@ -3,9 +3,16 @@ const multer = require("multer");
 const fs = require("fs");
 const path = require("path");
 const { execFile } = require("child_process");
+const ffmpegPath = require("ffmpeg-static");
 const { clearDeviceTimeline, updateSectionTimeline } = require("../services/playbackTimeline");
 const { encodeVideo } = require("../services/videoEncoder");
 const { safeStat, safeReaddir, safeExistsDir, safeExists, wait } = require("../utils/fsSafe");
+const {
+  isYoutubeUrl,
+  findYtDlpBinary,
+  ensureYtDlpBinary,
+  canExecuteYtDlp,
+} = require("../utils/ytDlp");
 const { parseTargetValue, resolveTargetDeviceIds } = require("../services/deviceRegistry");
 
 const router = express.Router();
@@ -446,6 +453,97 @@ async function renameWithRetry(fromPath, toPath, retries = 5, delayMs = 140) {
   throw lastErr || new Error("rename-failed");
 }
 
+async function execFileCapture(cmd, args, timeoutMs = 20 * 60 * 1000) {
+  return await new Promise((resolve, reject) => {
+    execFile(
+      cmd,
+      args,
+      {
+        timeout: timeoutMs,
+        maxBuffer: 1024 * 1024 * 8,
+      },
+      (err, stdout, stderr) => {
+        if (err) {
+          err.stdout = stdout;
+          err.stderr = stderr;
+          reject(err);
+          return;
+        }
+        resolve({
+          stdout: String(stdout || ""),
+          stderr: String(stderr || ""),
+        });
+      }
+    );
+  });
+}
+
+async function downloadYoutubeVideoToDirectory(youtubeUrl, outputDir) {
+  let ytDlpBinary = findYtDlpBinary();
+  if (!ytDlpBinary) {
+    try {
+      ytDlpBinary = await ensureYtDlpBinary();
+    } catch (error) {
+      throw new Error(
+        `yt-dlp bootstrap failed. Check internet on CMS PC and retry. ${String(
+          error?.message || error || ""
+        ).trim()}`
+      );
+    }
+  }
+
+  if (!ytDlpBinary || !canExecuteYtDlp(ytDlpBinary)) {
+    throw new Error("yt-dlp is unavailable on CMS PC.");
+  }
+
+  ensureDir(outputDir);
+  const beforeFiles = new Set(safeReaddir(outputDir));
+  const outputTemplate = path.join(outputDir, "youtube-%(title).80s-%(id)s.%(ext)s");
+  const args = [
+    "--no-playlist",
+    "--restrict-filenames",
+    "--no-warnings",
+    "--output",
+    outputTemplate,
+    "--merge-output-format",
+    "mp4",
+    "--format",
+    "b[ext=mp4][height<=1080]/b[height<=1080]/bv*[height<=1080][ext=mp4]+ba[ext=m4a]/bv*[height<=1080]+ba/b",
+  ];
+
+  if (ffmpegPath && safeExists(ffmpegPath)) {
+    args.push("--ffmpeg-location", ffmpegPath);
+  }
+
+  args.push(youtubeUrl);
+
+  try {
+    await execFileCapture(ytDlpBinary, args, 20 * 60 * 1000);
+  } catch (error) {
+    const detail = String(error?.stderr || error?.stdout || error?.message || "").trim();
+    throw new Error(detail || "YouTube download failed");
+  }
+
+  const newFiles = safeReaddir(outputDir)
+    .filter((name) => !beforeFiles.has(name))
+    .filter((name) => VIDEO_EXTENSIONS.has(path.extname(name).toLowerCase()));
+
+  if (newFiles.length) {
+    return path.join(outputDir, newFiles.sort()[newFiles.length - 1]);
+  }
+
+  const fallbackFiles = safeReaddir(outputDir)
+    .filter((name) => VIDEO_EXTENSIONS.has(path.extname(name).toLowerCase()))
+    .map((name) => ({ name, stat: safeStat(path.join(outputDir, name)) }))
+    .sort((a, b) => Number(b.stat?.mtimeMs || 0) - Number(a.stat?.mtimeMs || 0));
+
+  if (fallbackFiles[0]?.name) {
+    return path.join(outputDir, fallbackFiles[0].name);
+  }
+
+  throw new Error("Downloaded YouTube video file not found");
+}
+
 function copyDirectoryRecursive(sourceDir, targetDir) {
   ensureDir(targetDir);
   const entries = safeReaddir(sourceDir);
@@ -569,7 +667,10 @@ async function activateIncomingSection(deviceId, section, incomingDir) {
   };
 }
 
-async function optimizeVideosInDirectory(dirPath) {
+async function optimizeVideosInDirectory(
+  dirPath,
+  options = { forceTranscodeMp4: false, transcodeOptions: {} }
+) {
   if (DISABLE_UPLOAD_TRANSCODE || String(process.env.DISABLE_VIDEO_TRANSCODE || "") === "1") {
     return;
   }
@@ -585,14 +686,17 @@ async function optimizeVideosInDirectory(dirPath) {
     const stat = safeStat(inputPath, { retries: 6 });
     if (!stat) continue;
 
-    if (DIRECT_PLAY_VIDEO_EXTENSIONS.has(ext)) {
+    if (DIRECT_PLAY_VIDEO_EXTENSIONS.has(ext) && !options.forceTranscodeMp4) {
       console.log("Skipping transcode for direct-play MP4:", fileName);
       continue;
     }
 
     try {
-      console.log("Transcoding video:", fileName);
-      const encodedPath = await encodeVideo(inputPath);
+      console.log(
+        options.forceTranscodeMp4 ? "Force transcoding video:" : "Transcoding video:",
+        fileName
+      );
+      const encodedPath = await encodeVideo(inputPath, options.transcodeOptions || {});
       const targetFileName = `${path.parse(fileName).name}.mp4`;
       const finalPath = uniqueFilePath(dirPath, targetFileName);
       await removePathWithRetry(inputPath, { force: true }, 5, 100);
@@ -906,6 +1010,156 @@ router.post("/:deviceId/section/:section", (req, res) => {
     console.log("Upload error:", error);
     emitSectionUploadStatus(targetValue, section, "error", humanizeUploadError(error, "Upload failed on server"));
     return res.status(500).json({ error: humanizeUploadError(error, "Upload failed on server") });
+  }
+});
+
+router.post("/youtube/:section", async (req, res) => {
+  const resolvedTarget = resolveUploadTarget(req);
+  const targetValue = resolvedTarget.raw || String(req.body?.targetDevice || "all");
+  const target = resolvedTarget.parsed;
+  const section = Number(req.params.section || 0);
+  const youtubeUrl = String(req.body?.url || "").trim();
+
+  if (target.type === "invalid") {
+    return res.status(400).json({ success: false, error: "invalid-device-id" });
+  }
+  if (!Number.isInteger(section) || section < 1 || section > 3) {
+    return res.status(400).json({ success: false, error: "invalid-section" });
+  }
+  if (!youtubeUrl || !isYoutubeUrl(youtubeUrl)) {
+    return res.status(400).json({ success: false, error: "invalid-youtube-url" });
+  }
+
+  const targetDeviceIds =
+    target.type === "all"
+      ? []
+      : target.type === "group"
+      ? getTargetDeviceIds(targetValue)
+      : [target.value];
+  if (target.type === "group" && !targetDeviceIds.length) {
+    return res.status(400).json({ success: false, error: "group-has-no-devices" });
+  }
+
+  const tempTargetId =
+    target.type === "all"
+      ? "all"
+      : target.type === "group"
+      ? `group_${String(target.value || "").replace(/[^a-zA-Z0-9_-]/g, "_")}`
+      : target.value;
+  const uploadToken = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  const tempSectionPath = path.join(
+    uploadsBase,
+    tempTargetId,
+    `section${section}__incoming_${uploadToken}`
+  );
+
+  try {
+    cleanupStaleIncomingDirs(tempTargetId, section);
+    ensureDir(tempSectionPath);
+    emitSectionUploadStatus(
+      targetValue,
+      section,
+      "processing",
+      "Downloading YouTube video on CMS PC... Please wait."
+    );
+
+    const downloadedFilePath = await downloadYoutubeVideoToDirectory(youtubeUrl, tempSectionPath);
+    if (!safeExists(downloadedFilePath)) {
+      throw new Error("YouTube download completed but file was not found");
+    }
+
+    let activations = [];
+    if (target.type === "all") {
+      activations = [
+        {
+          deviceId: "all",
+          activation: await activateIncomingSection("all", section, tempSectionPath),
+        },
+      ];
+    } else {
+      for (const currentDeviceId of targetDeviceIds) {
+        const memberIncomingPath = path.join(
+          uploadsBase,
+          currentDeviceId,
+          `section${section}__incoming_${uploadToken}`
+        );
+        if (safeExists(memberIncomingPath)) {
+          fs.rmSync(memberIncomingPath, { recursive: true, force: true });
+        }
+        ensureDir(memberIncomingPath);
+        copyDirectoryRecursive(tempSectionPath, memberIncomingPath);
+        activations.push({
+          deviceId: currentDeviceId,
+          activation: await activateIncomingSection(currentDeviceId, section, memberIncomingPath),
+        });
+      }
+      if (safeExists(tempSectionPath)) {
+        fs.rmSync(tempSectionPath, { recursive: true, force: true });
+      }
+    }
+
+    if (target.type === "all" && safeExistsDir(uploadsBase)) {
+      const folders = safeReaddir(uploadsBase);
+      for (const folder of folders) {
+        if (folder === "all") continue;
+        clearDeviceTimeline(folder);
+        const { sectionBase, versionsDir, activeFile } = sectionPaths(folder, section);
+        try {
+          if (safeExists(sectionBase)) fs.rmSync(sectionBase, { recursive: true, force: true });
+          if (safeExists(versionsDir)) fs.rmSync(versionsDir, { recursive: true, force: true });
+          if (safeExists(activeFile)) fs.rmSync(activeFile, { force: true });
+        } catch {
+        }
+      }
+    }
+
+    if (global.io) {
+      const syncAt = Date.now() + 3000;
+      if (target.type === "all") {
+        const activation = activations[0]?.activation || null;
+        const timeline = updateSectionTimeline("all", section, {
+          targetDevice: "all",
+          syncAt,
+          updatedAt: activation?.updatedAt || Date.now(),
+          cycleId: `${section}-${String(activation?.versionName || Date.now())}`,
+          fileCount: Array.isArray(activation?.activeFiles) ? activation.activeFiles.length : 0,
+          mediaSignature: Array.isArray(activation?.activeFiles)
+            ? activation.activeFiles.join("|")
+            : "",
+        });
+        global.io.emit("media-updated", { syncAt, section, timeline });
+      } else {
+        for (const item of activations) {
+          const timeline = updateSectionTimeline(item.deviceId, section, {
+            targetDevice: item.deviceId,
+            syncAt,
+            updatedAt: item.activation?.updatedAt || Date.now(),
+            cycleId: `${section}-${String(item.activation?.versionName || Date.now())}`,
+            fileCount: Array.isArray(item.activation?.activeFiles) ? item.activation.activeFiles.length : 0,
+            mediaSignature: Array.isArray(item.activation?.activeFiles)
+              ? item.activation.activeFiles.join("|")
+              : "",
+          });
+          const socketId = global.connectedDevices?.[item.deviceId];
+          if (socketId) {
+            global.io.to(socketId).emit("media-updated", { syncAt, section, timeline });
+          }
+        }
+      }
+    }
+
+    emitSectionUploadStatus(targetValue, section, "ready", "");
+    return res.json({ success: true });
+  } catch (error) {
+    if (safeExists(tempSectionPath)) {
+      try {
+        fs.rmSync(tempSectionPath, { recursive: true, force: true });
+      } catch {
+      }
+    }
+    const message = humanizeUploadError(error, "YouTube download failed");
+    emitSectionUploadStatus(targetValue, section, "error", message);
+    return res.status(500).json({ success: false, error: message });
   }
 });
 

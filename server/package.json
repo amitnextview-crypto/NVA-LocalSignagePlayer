@@ -7,11 +7,13 @@
     "assets": [
       "public/**/*",
       "data/configs/default.json",
+      "bin/**/*",
       "node_modules/ffmpeg-static/ffmpeg.exe"
     ]
   },
   "scripts": {
     "start": "node index.js",
+    "ensure:yt-dlp": "node -e \"const {ensureYtDlpBinary}=require('./utils/ytDlp'); ensureYtDlpBinary().then((p)=>{console.log('yt-dlp ready:',p);}).catch((e)=>{console.error(String(e?.message||e)); process.exit(1);});\"",
     "build": "node .\\scripts\\build-version.js build-exe",
     "build:exe": "node .\\scripts\\build-version.js build-exe",
     "build:installer": "powershell -ExecutionPolicy Bypass -File .\\installer\\build-installer.ps1"

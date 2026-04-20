@@ -585,6 +585,9 @@ export default function App() {
     const nativeDeviceModule = (NativeModules as any)?.DeviceIdModule;
     if (!nativeDeviceModule) return;
     const emitter = new NativeEventEmitter(nativeDeviceModule);
+    const openAdminSub = emitter.addListener("adminBackPress", () => {
+      setShowAdmin((current) => !current);
+    });
     const sub = emitter.addListener("apkUpdateProgress", (payload: any) => {
       const status = String(payload?.status || "").trim();
       const message = String(payload?.message || "").trim();
@@ -602,6 +605,7 @@ export default function App() {
       }
     });
     return () => {
+      openAdminSub.remove();
       sub.remove();
     };
   }, []);
@@ -786,6 +790,13 @@ export default function App() {
       setReady(false);
     }
   };
+
+  useEffect(() => {
+    if (!showAdmin) return;
+    setTimeout(() => {
+      (Immersive as any).on?.();
+    }, 100);
+  }, [showAdmin]);
 
   useEffect(() => {
     if (!bootReady || !licenseReady || !licensed) return;

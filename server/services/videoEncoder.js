@@ -47,17 +47,24 @@ function createOutputPath(inputPath) {
   return path.join(parsed.dir, `${parsed.name}__tv.mp4`);
 }
 
-function encodeVideo(inputPath) {
+function encodeVideo(inputPath, options = {}) {
   return new Promise((resolve, reject) => {
     const ffmpeg = resolveFfmpegPath();
     const outputPath = createOutputPath(inputPath);
+    const width = Math.max(320, Number(options.width || 1920));
+    const height = Math.max(240, Number(options.height || 1080));
+    const preset = String(options.preset || "veryfast");
+    const videoBitrate = String(options.videoBitrate || "4M");
+    const maxRate = String(options.maxRate || "5M");
+    const bufferSize = String(options.bufferSize || "8M");
+    const frameRate = Math.max(24, Number(options.frameRate || 30));
 
     const args = [
       "-y",
       "-i",
       inputPath,
       "-vf",
-      "scale=1920:1080",
+      `scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:black`,
       "-c:v",
       "libx264",
       "-profile:v",
@@ -67,21 +74,21 @@ function encodeVideo(inputPath) {
       "-pix_fmt",
       "yuv420p",
       "-preset",
-      "veryfast",
+      preset,
       "-r",
-      "30",
+      String(frameRate),
       "-g",
-      "30",
+      String(frameRate),
       "-keyint_min",
-      "30",
+      String(frameRate),
       "-sc_threshold",
       "0",
       "-b:v",
-      "4M",
+      videoBitrate,
       "-maxrate",
-      "5M",
+      maxRate,
       "-bufsize",
-      "8M",
+      bufferSize,
       "-c:a",
       "aac",
       "-b:a",

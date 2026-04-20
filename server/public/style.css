@@ -868,6 +868,12 @@ input[type="range"] {
   margin-bottom: 8px;
 }
 
+.youtube-redownload-row {
+  margin-top: 2px;
+  margin-bottom: 10px;
+  font-size: 13px;
+}
+
 .main-grid {
   display: grid;
   grid-template-columns: minmax(260px, 340px) minmax(540px, 1fr) minmax(360px, 460px);

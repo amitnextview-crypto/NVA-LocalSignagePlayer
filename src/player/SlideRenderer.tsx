@@ -25,6 +25,8 @@ const VIDEO_FILE_RE = /\.(mp4|m4v|mov|mkv|webm)(\?.*)?$/i;
 const LARGE_VIDEO_STREAM_THRESHOLD_BYTES = 300 * 1024 * 1024;
 const HOLD_LARGE_VIDEO_UNTIL_CACHED = false;
 const VIDEO_PROGRESS_SAVE_INTERVAL_MS = 1000;
+const DESKTOP_WEBVIEW_USER_AGENT =
+  "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
 
 function normalizeWebUrl(url: string) {
   const value = String(url || "").trim();
@@ -274,6 +276,7 @@ export default function SlideRenderer({
   const pdfDesiredSlotRef = useRef<"a" | "b">("a");
   const pdfRetryCountRef = useRef(0);
   const pendingLocalSwitchRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const cacheLocalSwitchDoneRef = useRef<Record<string, boolean>>({});
   const videoTransientErrorRef = useRef<Record<string, number>>({});
   const badMediaRef = useRef<Record<string, number>>({});
   const durationByIdentityRef = useRef<Record<string, number>>({});
@@ -446,7 +449,10 @@ export default function SlideRenderer({
 
   const sectionConfig = config?.sections?.[sectionIndex] || {};
   const sourceType = sectionConfig?.sourceType || SOURCE_TYPES.multimedia;
+  const inputSourceType = sectionConfig?.inputSourceType || sourceType;
   const sourceUrl = sectionConfig?.sourceUrl || "";
+  const isYoutubeDerivedMultimedia =
+    sourceType === SOURCE_TYPES.multimedia && inputSourceType === SOURCE_TYPES.youtube;
   const isMultiPaneLayout = config?.layout === "grid2" || config?.layout === "grid3";
   const mediaRotateLayerStyle = styles.fillLayer;
 
@@ -501,6 +507,13 @@ export default function SlideRenderer({
       if (allowed.has(key)) nextBad[key] = badMediaRef.current[key];
     }
     badMediaRef.current = nextBad;
+    const nextCacheSwitches: Record<string, boolean> = {};
+    for (const key of Object.keys(cacheLocalSwitchDoneRef.current)) {
+      if (allowed.has(key)) {
+        nextCacheSwitches[key] = cacheLocalSwitchDoneRef.current[key];
+      }
+    }
+    cacheLocalSwitchDoneRef.current = nextCacheSwitches;
   }, [files]);
 
   useEffect(() => {
@@ -1249,6 +1262,55 @@ export default function SlideRenderer({
       }
     };
   }, [files, index, uri, sourceType, cacheProgress]);
+
+  useEffect(() => {
+    if (sourceType !== SOURCE_TYPES.multimedia) return;
+    if (!files.length) return;
+    const file = files[index];
+    if (!file || !isVideoFile(file)) return;
+    if (cacheProgress < 100) return;
+
+    const identity = getMediaStableIdentity(file);
+    if (cacheLocalSwitchDoneRef.current[identity]) return;
+
+    const localPlayableUri = normalizeMediaUri(String(file?.remoteUrl || ""));
+    const usingRemote = /^https?:\/\//i.test(String(uri || ""));
+    if (!/^file:\/\//i.test(localPlayableUri) || !usingRemote) return;
+
+    cacheLocalSwitchDoneRef.current[identity] = true;
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const localPath = localPlayableUri.replace(/^file:\/\//i, "");
+        const exists = await RNFS.exists(localPath);
+        if (!exists || cancelled || !isMountedRef.current) {
+          if (!exists) {
+            delete cacheLocalSwitchDoneRef.current[identity];
+          }
+          return;
+        }
+
+        // Refresh player once after the cache is ready so TVs do not stay stuck on stream->local handoff.
+        prepareVideoReloadFromCurrentPosition();
+        pinnedMediaUriRef.current = {
+          identity: getMediaIdentity(file),
+          uri: localPlayableUri,
+        };
+        lastGoodUriByIdentityRef.current[getMediaContentIdentity(file)] = localPlayableUri;
+        lastGoodAnyUriRef.current = localPlayableUri;
+        setForceLocalRestart(false);
+        setUri(localPlayableUri);
+        setVideoReloadToken((prev) => prev + 1);
+      } catch {
+        delete cacheLocalSwitchDoneRef.current[identity];
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [cacheProgress, files, index, sourceType, uri]);
 
   useEffect(() => {
     if (sourceType !== SOURCE_TYPES.multimedia) return;
@@ -2079,9 +2141,15 @@ export default function SlideRenderer({
             style={styles.media}
             javaScriptEnabled
             domStorageEnabled
+            sharedCookiesEnabled
+            thirdPartyCookiesEnabled
+            cacheEnabled
             allowsInlineMediaPlayback
             allowsFullscreenVideo
             mediaPlaybackRequiresUserAction={false}
+            setSupportMultipleWindows={false}
+            userAgent={DESKTOP_WEBVIEW_USER_AGENT}
+            javaScriptCanOpenWindowsAutomatically
             onError={handleRenderError}
           />
         </View>
@@ -2314,7 +2382,7 @@ export default function SlideRenderer({
               rotation={0}
               muted={false}
               startPositionMs={resumePositionMs}
-              resizeMode="stretch"
+              resizeMode={isYoutubeDerivedMultimedia ? "contain" : "stretch"}
               repeat={files.length === 1 && !forceLocalRestart}
               onEnd={() => {
                 videoProgressRef.current = { positionMs: 0, durationMs: 0 };

@@ -1,6 +1,7 @@
 const fs = require("fs");
 const path = require("path");
 const { spawnSync } = require("child_process");
+const { ensureYtDlpBinary } = require("../utils/ytDlp");
 
 function getBuildVersion(date = new Date()) {
   return "1.0.0";
@@ -35,7 +36,15 @@ function resolvePkgCommand(serverDir) {
     : { command: "npx", args: ["pkg"] };
 }
 
-function buildExe(serverDir, version) {
+async function buildExe(serverDir, version) {
+  try {
+    const ytDlpPath = await ensureYtDlpBinary();
+    console.log(`yt-dlp ready for build: ${ytDlpPath}`);
+  } catch (error) {
+    console.error(`Failed to prepare yt-dlp for build: ${String(error?.message || error)}`);
+    process.exit(1);
+  }
+
   const { command, args } = resolvePkgCommand(serverDir);
   const outputName = "NVAPlayerPC.exe";
   const result = spawnSync(
@@ -67,7 +76,7 @@ function buildExe(serverDir, version) {
   console.log(`EXE: ${path.basename(sourceExe)}`);
 }
 
-function main() {
+async function main() {
   const mode = process.argv[2] || "print";
   const serverDir = path.resolve(__dirname, "..");
   const version = getBuildVersion();
@@ -79,7 +88,7 @@ function main() {
   }
 
   if (mode === "build-exe") {
-    buildExe(serverDir, version);
+    await buildExe(serverDir, version);
     return;
   }
 
@@ -87,4 +96,7 @@ function main() {
   process.exit(1);
 }
 
-main();
+main().catch((error) => {
+  console.error(String(error?.message || error || "Unknown build error"));
+  process.exit(1);
+});

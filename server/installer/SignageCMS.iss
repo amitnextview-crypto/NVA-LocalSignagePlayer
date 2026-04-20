@@ -37,6 +37,7 @@ Name: "startup"; Description: "Start NVAPlayerPC when Windows starts"; GroupDesc
 [Files]
 Source: "..\NVAPlayerPC.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "assets\nvlogo.ico"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\bin\yt-dlp.exe"; DestDir: "{app}\bin"; Flags: ignoreversion skipifsourcedoesntexist
 Source: "..\..\android\app\build\outputs\apk\release\NVAPlayerPC.apk"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
 
 [Icons]

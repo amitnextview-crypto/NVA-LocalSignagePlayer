@@ -3,33 +3,39 @@
   "layout": "fullscreen",
   "grid3Layout": "stack-v",
   "gridRatio": "1:1",
-  "slideDuration": 5,
+  "slideDuration": 15,
   "animation": "slide",
   "bgColor": "#000000",
   "sections": [
     {
       "slideDirection": "left",
-      "slideDuration": 5,
+      "slideDuration": 15,
       "sourceType": "multimedia",
-      "sourceUrl": "https://www.canva.com/design/DAHGt0ud368/9XxfgMM3KexEIKqaM02ssg/edit"
+      "sourceUrl": "",
+      "inputSourceType": "multimedia",
+      "inputSourceUrl": ""
     },
     {
       "slideDirection": "left",
       "slideDuration": 5,
       "sourceType": "multimedia",
-      "sourceUrl": ""
+      "sourceUrl": "",
+      "inputSourceType": "multimedia",
+      "inputSourceUrl": ""
     },
     {
       "slideDirection": "left",
       "slideDuration": 5,
       "sourceType": "multimedia",
-      "sourceUrl": ""
+      "sourceUrl": "",
+      "inputSourceType": "multimedia",
+      "inputSourceUrl": ""
     }
   ],
   "ticker": {
     "text": "Breaking News: NextView Premium Product New Update Available!",
     "color": "#ffffff",
-    "bgColor": "#7a7c04",
+    "bgColor": "#000000",
     "speed": 6,
     "fontSize": 24,
     "position": "bottom"

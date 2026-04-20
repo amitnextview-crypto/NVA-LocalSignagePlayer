@@ -17,6 +17,7 @@ const {
   getGroupsForDevice,
   sanitizeDeviceId,
 } = require("./services/deviceRegistry");
+const { ensureYtDlpBinary, findYtDlpBinary } = require("./utils/ytDlp");
 
 // Runtime writable base path (user-local in pkg mode to avoid permission issues)
 const runtimeBasePath = process.pkg
@@ -37,6 +38,24 @@ global.assetBasePath = assetBasePath;
 if (!fs.existsSync(runtimeBasePath)) {
   fs.mkdirSync(runtimeBasePath, { recursive: true });
 }
+
+ensureYtDlpBinary()
+  .then((binaryPath) => {
+    if (binaryPath) {
+      console.log(`yt-dlp ready: ${binaryPath}`);
+    }
+  })
+  .catch((error) => {
+    const existing = findYtDlpBinary();
+    if (existing) {
+      console.log(`yt-dlp ready: ${existing}`);
+      return;
+    }
+    console.log(
+      "yt-dlp bootstrap skipped:",
+      String(error?.message || error || "unknown")
+    );
+  });
 
 const configRoutes = require("./routes/config");
 const uploadRoutes = require("./routes/upload");

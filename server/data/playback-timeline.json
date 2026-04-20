@@ -3,27 +3,27 @@
     "sections": {
       "1": {
         "section": 1,
-        "cycleId": "1-1776673382642_krpgwk",
-        "syncAt": 1776673385791,
-        "updatedAt": 1776673382777,
-        "fileCount": 25,
-        "mediaSignature": "WhatsApp_Video_2025-06-18_at_1.37.58_PM.mp4|WhatsApp_Video_2025-06-18_at_1.37.59_PM.mp4|WhatsApp_Video_2025-06-18_at_1.38.00_PM.mp4|WhatsApp_Video_2025-06-18_at_1.38.00_PM__1_.mp4|WhatsApp_Video_2025-06-18_at_1.38.02_PM.mp4|WhatsApp_Video_2025-06-18_at_1.38.02_PM_-_Copy.mp4|WhatsApp_Video_2025-06-18_at_1.38.03_PM.mp4|WhatsApp_Video_2025-06-18_at_1.38.05_PM.mp4|WhatsApp_Video_2025-06-18_at_1.38.07_PM.mp4|WhatsApp_Video_2025-06-18_at_1.38.07_PM__1_.mp4|WhatsApp_Video_2025-06-18_at_1.38.08_PM.mp4|WhatsApp_Video_2025-06-18_at_1.38.08_PM__1_.mp4|WhatsApp_Video_2025-06-18_at_1.38.09_PM.mp4|WhatsApp_Video_2025-06-18_at_1.38.10_PM.mp4|WhatsApp_Video_2025-06-18_at_1.38.13_PM.mp4|WhatsApp_Video_2025-06-18_at_1.38.14_PM.mp4|WhatsApp_Video_2025-06-18_at_1.38.15_PM.mp4|WhatsApp_Video_2025-06-18_at_1.38.23_PM.mp4|WhatsApp_Video_2025-06-18_at_1.38.23_PM__1_.mp4|WhatsApp_Video_2025-06-18_at_1.38.24_PM.mp4|WhatsApp_Video_2025-06-18_at_1.38.25_PM.mp4|WhatsApp_Video_2025-06-18_at_1.38.26_PM.mp4|WhatsApp_Video_2025-06-18_at_1.38.26_PM__1_.mp4|WhatsApp_Video_2025-06-18_at_1.38.26_PM__2_.mp4|WhatsApp_Video_2025-07-15_at_19.29.31.mp4",
+        "cycleId": "1-1776688995429_a3y2s0",
+        "syncAt": 1776688998910,
+        "updatedAt": 1776688995797,
+        "fileCount": 3,
+        "mediaSignature": "MEGGI___TEA__COLD_DRINKS.png|MISAL_PAV___TEA_COLD_DRINKS.png|MIX_VEG._PAKODA___TEA__COLD_DRINKS.png",
         "targetDevice": "all"
       },
       "2": {
         "section": 2,
-        "cycleId": "2-cleared-1776673372980",
-        "syncAt": 1776673372980,
-        "updatedAt": 1776673372980,
+        "cycleId": "2-cleared-1776689044542",
+        "syncAt": 1776689044543,
+        "updatedAt": 1776689044542,
         "fileCount": 0,
         "mediaSignature": "",
         "targetDevice": "all"
       },
       "3": {
         "section": 3,
-        "cycleId": "3-cleared-1776673372981",
-        "syncAt": 1776673372982,
-        "updatedAt": 1776673372981,
+        "cycleId": "3-cleared-1776689044543",
+        "syncAt": 1776689044543,
+        "updatedAt": 1776689044543,
         "fileCount": 0,
         "mediaSignature": "",
         "targetDevice": "all"
@@ -31,25 +31,25 @@
     }
   },
   "devices": {
-    "4aa1624c74676d0b": {
+    "group_office": {
       "sections": {
         "2": {
           "section": 2,
-          "cycleId": "2-cleared-1776673372983",
-          "syncAt": 1776673372983,
-          "updatedAt": 1776673372983,
+          "cycleId": "2-cleared-1776689044545",
+          "syncAt": 1776689044545,
+          "updatedAt": 1776689044545,
           "fileCount": 0,
           "mediaSignature": "",
-          "targetDevice": "4aa1624c74676d0b"
+          "targetDevice": "group_office"
         },
         "3": {
           "section": 3,
-          "cycleId": "3-cleared-1776673372984",
-          "syncAt": 1776673372985,
-          "updatedAt": 1776673372984,
+          "cycleId": "3-cleared-1776689044546",
+          "syncAt": 1776689044546,
+          "updatedAt": 1776689044546,
           "fileCount": 0,
           "mediaSignature": "",
-          "targetDevice": "4aa1624c74676d0b"
+          "targetDevice": "group_office"
         }
       }
     }

@@ -41,7 +41,12 @@ let selectedGridRatio = "1:1:1";
 let latestDeviceStatusList = [];
 let latestDeviceCatalog = { devices: [], groups: [] };
 let isDeviceDashboardOpen = false;
+let persistedConfig = null;
 const seenApkUpdateSuccessNotices = new Set();
+
+function refreshCMSPage() {
+  window.location.reload();
+}
 
 function escapeHtml(value) {
   return String(value || "")
@@ -1601,6 +1606,105 @@ function startPreviewPolling() {
   }, 15000);
 }
 
+function buildConfigForSubmit(config) {
+  return {
+    ...config,
+    sections: (config.sections || []).map((section) => {
+      const sourceType = String(section?.sourceType || SECTION_SOURCE_TYPES.multimedia);
+      const sourceUrl = String(section?.sourceUrl || "").trim();
+
+      if (sourceType === SECTION_SOURCE_TYPES.youtube) {
+        return {
+          ...section,
+          sourceType: SECTION_SOURCE_TYPES.multimedia,
+          sourceUrl: "",
+          inputSourceType: SECTION_SOURCE_TYPES.youtube,
+          inputSourceUrl: sourceUrl,
+        };
+      }
+
+      return {
+        ...section,
+        inputSourceType: sourceType,
+        inputSourceUrl: sourceUrl,
+      };
+    }),
+  };
+}
+
+function shouldDownloadYoutubeSection(section, index) {
+  const sectionNumber = index + 1;
+  const sourceType = String(section?.sourceType || "");
+  const sourceUrl = String(section?.sourceUrl || "").trim();
+  if (sourceType !== SECTION_SOURCE_TYPES.youtube || !sourceUrl) {
+    return false;
+  }
+
+  const forceCheckbox = document.getElementById(`youtubeRedownload${sectionNumber}`);
+  const forceRedownload = !!forceCheckbox?.checked;
+  if (forceRedownload) {
+    return true;
+  }
+
+  const previousSection = persistedConfig?.sections?.[index] || {};
+  const previousInputType = String(
+    previousSection?.inputSourceType || previousSection?.sourceType || SECTION_SOURCE_TYPES.multimedia
+  );
+  const previousUrl = String(
+    previousSection?.inputSourceUrl || previousSection?.sourceUrl || ""
+  ).trim();
+
+  return previousInputType !== SECTION_SOURCE_TYPES.youtube || previousUrl !== sourceUrl;
+}
+
+async function downloadYoutubeSections(config, targetDevice) {
+  const youtubeSections = (config.sections || [])
+    .map((section, index) => ({
+      sectionNumber: index + 1,
+      sectionIndex: index,
+      sourceType: String(section?.sourceType || ""),
+      sourceUrl: String(section?.sourceUrl || "").trim(),
+      shouldDownload: shouldDownloadYoutubeSection(section, index),
+    }))
+    .filter((item) => item.sourceType === SECTION_SOURCE_TYPES.youtube);
+
+  for (const item of youtubeSections) {
+    if (!item.sourceUrl) {
+      throw new Error(`Section ${item.sectionNumber}: YouTube URL is required.`);
+    }
+
+    if (!item.shouldDownload) {
+      continue;
+    }
+
+    updateUploadProgress(
+      0,
+      `Downloading YouTube video for Section ${item.sectionNumber} on CMS PC...`
+    );
+
+    const res = await fetch(`/upload/youtube/${item.sectionNumber}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        targetDevice,
+        url: item.sourceUrl,
+      }),
+    });
+
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data?.success === false) {
+      throw new Error(
+        data?.error || `Section ${item.sectionNumber}: YouTube download failed.`
+      );
+    }
+
+    updateUploadProgress(
+      100,
+      `Section ${item.sectionNumber} YouTube video downloaded successfully.`
+    );
+  }
+}
+
 function updateSectionVisibility() {
   const layout = document.getElementById("layout").value;
 
@@ -1915,11 +2019,15 @@ function updateSectionUploadMode(section) {
   const uploadWrap = document.getElementById(`uploadWrap${section}`);
   const sourceWrap = document.getElementById(`sourceUrlWrap${section}`);
   const sourceInput = document.getElementById(`sourceUrl${section}`);
+  const youtubeOptionsWrap = document.getElementById(`youtubeOptionsWrap${section}`);
   if (!typeEl) return;
 
   const sourceType = typeEl.value || SECTION_SOURCE_TYPES.multimedia;
   if (uploadWrap) uploadWrap.classList.toggle("hidden", sourceType !== SECTION_SOURCE_TYPES.multimedia);
   if (sourceWrap) sourceWrap.classList.toggle("hidden", sourceType === SECTION_SOURCE_TYPES.multimedia);
+  if (youtubeOptionsWrap) {
+    youtubeOptionsWrap.classList.toggle("hidden", sourceType !== SECTION_SOURCE_TYPES.youtube);
+  }
 
   if (sourceInput) {
     if (sourceType === SECTION_SOURCE_TYPES.youtube) {
@@ -1960,6 +2068,10 @@ function renderUploadSections() {
             placeholder=""
             oninput="onSectionSourceUrlInput()"
           />
+          <label id="youtubeOptionsWrap${i}" class="switch-row hidden youtube-redownload-row">
+            <input type="checkbox" id="youtubeRedownload${i}" />
+            <span>Re-download this YouTube video on save</span>
+          </label>
         </div>
         <div id="uploadWrap${i}" class="upload-row">
           <input
@@ -2356,6 +2468,7 @@ async function loadConfig() {
   const targetDevice = getSelectedTargetValue();
   const res = await fetch(`/config?deviceId=${targetDevice}&ts=${Date.now()}`);
   const config = await res.json();
+  persistedConfig = config;
 
   document.getElementById("orientation").value = config.orientation || "horizontal";
   document.getElementById("layout").value = config.layout || "fullscreen";
@@ -2394,42 +2507,83 @@ async function loadConfig() {
     const sectionConfig = config.sections?.[i - 1] || {};
     const typeEl = document.getElementById(`sourceType${i}`);
     const urlEl = document.getElementById(`sourceUrl${i}`);
-    if (typeEl) typeEl.value = sectionConfig.sourceType || SECTION_SOURCE_TYPES.multimedia;
-    if (urlEl) urlEl.value = sectionConfig.sourceUrl || "";
+    if (typeEl) {
+      typeEl.value =
+        sectionConfig.inputSourceType ||
+        sectionConfig.sourceType ||
+        SECTION_SOURCE_TYPES.multimedia;
+    }
+    if (urlEl) {
+      urlEl.value = sectionConfig.inputSourceUrl || sectionConfig.sourceUrl || "";
+    }
+    const redownloadEl = document.getElementById(`youtubeRedownload${i}`);
+    if (redownloadEl) {
+      redownloadEl.checked = false;
+    }
     updateSectionUploadMode(i);
   }
   updateSectionVisibility();
 }
 
 async function saveConfig() {
-  const config = buildConfigFromForm();
+  const loader = document.getElementById("uploadLoader");
+  const rawConfig = buildConfigFromForm();
   const targetDevice = getSelectedTargetValue();
 
-  currentConfig = config;
-  const res = await fetch("/config", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ targetDevice, config }),
-  });
+  currentConfig = rawConfig;
+  if (loader) {
+    loader.classList.remove("hidden");
+    updateUploadProgress(0, "Preparing configuration...");
+  }
 
-  if (!res.ok) {
-    let msg = `Save failed (HTTP ${res.status})`;
-    try {
-      const data = await res.json();
-      if (data?.error) msg = data.error;
-    } catch (_e) {
+  try {
+    await downloadYoutubeSections(rawConfig, targetDevice);
+    const config = buildConfigForSubmit(rawConfig);
+    currentConfig = config;
+    const res = await fetch("/config", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ targetDevice, config }),
+    });
+
+    if (!res.ok) {
+      let msg = `Save failed (HTTP ${res.status})`;
+      try {
+        const data = await res.json();
+        if (data?.error) msg = data.error;
+      } catch (_e) {
+      }
+      showNotice("error", "Save Failed", msg, 6500);
+      return;
     }
-    showNotice("error", "Save Failed", msg, 6500);
-    return;
+
+    await loadConfig();
+    for (let i = 1; i <= 3; i += 1) {
+      const redownloadEl = document.getElementById(`youtubeRedownload${i}`);
+      if (redownloadEl) {
+        redownloadEl.checked = false;
+      }
+    }
+    showNotice("success", "Settings Saved", "Configuration has been applied successfully.");
+
+    if (window.ReactNativeWebView) {
+      window.ReactNativeWebView.postMessage("CONFIG_SAVED");
+    }
+
+    renderScreenPreview();
+  } catch (error) {
+    showNotice(
+      "error",
+      "YouTube Save Failed",
+      String(error?.message || error || "Unknown error"),
+      8000
+    );
+  } finally {
+    if (loader) {
+      loader.classList.add("hidden");
+      updateUploadProgress(0, "Preparing upload...");
+    }
   }
-
-  showNotice("success", "Settings Saved", "Configuration has been applied successfully.");
-
-  if (window.ReactNativeWebView) {
-    window.ReactNativeWebView.postMessage("CONFIG_SAVED");
-  }
-
-  renderScreenPreview();
 }
 
 async function clearDeviceData() {

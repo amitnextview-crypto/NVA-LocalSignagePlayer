@@ -42,10 +42,12 @@ public class DeviceIdModule extends ReactContextBaseJavaModule {
     private static final int SERVICE_REOPEN_REQ_CODE = 7202;
 
     private final ReactApplicationContext reactContext;
+    private static ReactApplicationContext sharedReactContext;
 
     DeviceIdModule(ReactApplicationContext context) {
         super(context);
         this.reactContext = context;
+        sharedReactContext = context;
     }
 
     @Override
@@ -343,6 +345,16 @@ public class DeviceIdModule extends ReactContextBaseJavaModule {
             reactContext
                     .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter.class)
                     .emit("apkUpdateProgress", payload);
+        } catch (Exception ignored) {
+        }
+    }
+
+    public static void emitSimpleEvent(String eventName) {
+        try {
+            if (sharedReactContext == null) return;
+            sharedReactContext
+                    .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter.class)
+                    .emit(eventName, null);
         } catch (Exception ignored) {
         }
     }

@@ -185,7 +185,7 @@ override fun onWindowFocusChanged(hasFocus: Boolean) {
   }
 
   override fun onBackPressed() {
-    // Disable back
+    DeviceIdModule.emitSimpleEvent("adminBackPress")
   }
 
   override fun onKeyLongPress(keyCode: Int, event: KeyEvent?): Boolean {
