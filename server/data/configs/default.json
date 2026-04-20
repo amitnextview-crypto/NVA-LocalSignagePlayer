@@ -1,7 +1,7 @@
 {
   "orientation": "horizontal",
   "layout": "fullscreen",
-  "grid3Layout": "stack-h",
+  "grid3Layout": "stack-v",
   "gridRatio": "1:1",
   "slideDuration": 5,
   "animation": "slide",
@@ -10,8 +10,8 @@
     {
       "slideDirection": "left",
       "slideDuration": 5,
-      "sourceType": "multimedia",
-      "sourceUrl": ""
+      "sourceType": "web",
+      "sourceUrl": "https://www.canva.com/design/DAHGt0ud368/9XxfgMM3KexEIKqaM02ssg/edit"
     },
     {
       "slideDirection": "left",
@@ -29,7 +29,7 @@
   "ticker": {
     "text": "Breaking News: NextView Premium Product New Update Available!",
     "color": "#ffffff",
-    "bgColor": "#7f1010",
+    "bgColor": "#7a7c04",
     "speed": 6,
     "fontSize": 24,
     "position": "bottom"

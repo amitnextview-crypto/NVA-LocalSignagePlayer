@@ -3,14 +3,121 @@
     "sections": {
       "1": {
         "section": 1,
-        "cycleId": "1-1776669373390_jvnlkh",
-        "syncAt": 1776669376525,
-        "updatedAt": 1776669373523,
-        "fileCount": 3,
-        "mediaSignature": "videoplayback.mp4|videoplayback__4_.mp4|videoplayback__5_.mp4",
+        "cycleId": "1-1776672248784_web9az",
+        "syncAt": 1776672251929,
+        "updatedAt": 1776672248923,
+        "fileCount": 25,
+        "mediaSignature": "WhatsApp_Video_2025-06-18_at_1.37.58_PM.mp4|WhatsApp_Video_2025-06-18_at_1.37.59_PM.mp4|WhatsApp_Video_2025-06-18_at_1.38.00_PM.mp4|WhatsApp_Video_2025-06-18_at_1.38.00_PM__1_.mp4|WhatsApp_Video_2025-06-18_at_1.38.02_PM.mp4|WhatsApp_Video_2025-06-18_at_1.38.02_PM_-_Copy.mp4|WhatsApp_Video_2025-06-18_at_1.38.03_PM.mp4|WhatsApp_Video_2025-06-18_at_1.38.05_PM.mp4|WhatsApp_Video_2025-06-18_at_1.38.07_PM.mp4|WhatsApp_Video_2025-06-18_at_1.38.07_PM__1_.mp4|WhatsApp_Video_2025-06-18_at_1.38.08_PM.mp4|WhatsApp_Video_2025-06-18_at_1.38.08_PM__1_.mp4|WhatsApp_Video_2025-06-18_at_1.38.09_PM.mp4|WhatsApp_Video_2025-06-18_at_1.38.10_PM.mp4|WhatsApp_Video_2025-06-18_at_1.38.13_PM.mp4|WhatsApp_Video_2025-06-18_at_1.38.14_PM.mp4|WhatsApp_Video_2025-06-18_at_1.38.15_PM.mp4|WhatsApp_Video_2025-06-18_at_1.38.23_PM.mp4|WhatsApp_Video_2025-06-18_at_1.38.23_PM__1_.mp4|WhatsApp_Video_2025-06-18_at_1.38.24_PM.mp4|WhatsApp_Video_2025-06-18_at_1.38.25_PM.mp4|WhatsApp_Video_2025-06-18_at_1.38.26_PM.mp4|WhatsApp_Video_2025-06-18_at_1.38.26_PM__1_.mp4|WhatsApp_Video_2025-06-18_at_1.38.26_PM__2_.mp4|WhatsApp_Video_2025-07-15_at_19.29.31.mp4",
+        "targetDevice": "all"
+      },
+      "2": {
+        "section": 2,
+        "cycleId": "2-cleared-1776672803256",
+        "syncAt": 1776672803257,
+        "updatedAt": 1776672803256,
+        "fileCount": 0,
+        "mediaSignature": "",
+        "targetDevice": "all"
+      },
+      "3": {
+        "section": 3,
+        "cycleId": "3-cleared-1776672803258",
+        "syncAt": 1776672803258,
+        "updatedAt": 1776672803258,
+        "fileCount": 0,
+        "mediaSignature": "",
         "targetDevice": "all"
       }
     }
   },
-  "devices": {}
+  "devices": {
+    "4aa1624c74676d0b": {
+      "sections": {
+        "2": {
+          "section": 2,
+          "cycleId": "2-cleared-1776672803260",
+          "syncAt": 1776672803260,
+          "updatedAt": 1776672803260,
+          "fileCount": 0,
+          "mediaSignature": "",
+          "targetDevice": "4aa1624c74676d0b"
+        },
+        "3": {
+          "section": 3,
+          "cycleId": "3-cleared-1776672803261",
+          "syncAt": 1776672803262,
+          "updatedAt": 1776672803261,
+          "fileCount": 0,
+          "mediaSignature": "",
+          "targetDevice": "4aa1624c74676d0b"
+        }
+      }
+    },
+    "868e5a4be1b038ea": {
+      "sections": {
+        "2": {
+          "section": 2,
+          "cycleId": "2-cleared-1776672803262",
+          "syncAt": 1776672803263,
+          "updatedAt": 1776672803262,
+          "fileCount": 0,
+          "mediaSignature": "",
+          "targetDevice": "868e5a4be1b038ea"
+        },
+        "3": {
+          "section": 3,
+          "cycleId": "3-cleared-1776672803264",
+          "syncAt": 1776672803264,
+          "updatedAt": 1776672803264,
+          "fileCount": 0,
+          "mediaSignature": "",
+          "targetDevice": "868e5a4be1b038ea"
+        }
+      }
+    },
+    "aa57fb14dd658b75": {
+      "sections": {
+        "2": {
+          "section": 2,
+          "cycleId": "2-cleared-1776672803265",
+          "syncAt": 1776672803265,
+          "updatedAt": 1776672803265,
+          "fileCount": 0,
+          "mediaSignature": "",
+          "targetDevice": "aa57fb14dd658b75"
+        },
+        "3": {
+          "section": 3,
+          "cycleId": "3-cleared-1776672803266",
+          "syncAt": 1776672803266,
+          "updatedAt": 1776672803266,
+          "fileCount": 0,
+          "mediaSignature": "",
+          "targetDevice": "aa57fb14dd658b75"
+        }
+      }
+    },
+    "group_office": {
+      "sections": {
+        "2": {
+          "section": 2,
+          "cycleId": "2-cleared-1776672803267",
+          "syncAt": 1776672803267,
+          "updatedAt": 1776672803267,
+          "fileCount": 0,
+          "mediaSignature": "",
+          "targetDevice": "group_office"
+        },
+        "3": {
+          "section": 3,
+          "cycleId": "3-cleared-1776672803268",
+          "syncAt": 1776672803269,
+          "updatedAt": 1776672803268,
+          "fileCount": 0,
+          "mediaSignature": "",
+          "targetDevice": "group_office"
+        }
+      }
+    }
+  }
 }

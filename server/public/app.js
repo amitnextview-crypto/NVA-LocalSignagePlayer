@@ -2008,7 +2008,9 @@ async function loadDevices() {
   allOption.textContent = "All Devices";
   select.appendChild(allOption);
 
-  latestDeviceCatalog.groups.forEach((group) => {
+  latestDeviceCatalog.groups
+    .filter((group) => Array.isArray(group?.deviceIds) && group.deviceIds.length > 0)
+    .forEach((group) => {
     const opt = document.createElement("option");
     opt.value = `group:${group.id}`;
     opt.textContent = `Group: ${group.name}`;
@@ -2027,7 +2029,9 @@ async function loadDevices() {
 
   const availableValues = [
     "all",
-    ...latestDeviceCatalog.groups.map((group) => `group:${group.id}`),
+    ...latestDeviceCatalog.groups
+      .filter((group) => Array.isArray(group?.deviceIds) && group.deviceIds.length > 0)
+      .map((group) => `group:${group.id}`),
     ...latestDeviceCatalog.devices.map((device) => device.deviceId),
   ];
   select.value = availableValues.includes(currentSelected) ? currentSelected : "all";

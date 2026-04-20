@@ -36,6 +36,7 @@ import {
 } from "../services/mediaService";
 import {
   findCMS,
+  findKnownCMS,
   getServer,
   restoreServerFromStorage,
   setServer,
@@ -1018,28 +1019,21 @@ export default function App() {
           return;
         }
         try {
-          const restoredUrl = await restoreServerFromStorage();
-          const preferredUrl = restoredUrl || socketUrlRef.current || getServer();
           reconnectMissCount += 1;
-          if (
-            socket &&
-            !socket.connected &&
-            reconnectMissCount <= 3 &&
-            (!preferredUrl || preferredUrl === socketUrlRef.current)
-          ) {
-            socket.connect();
-            return;
-          }
+          const knownUrl = await findKnownCMS();
           const discoveredUrl =
-            reconnectMissCount <= 2 && preferredUrl ? preferredUrl : await findCMS();
-          if (
-            discoveredUrl &&
-            socket &&
-            socketUrlRef.current &&
-            discoveredUrl !== socketUrlRef.current
-          ) {
-            resetSocketConnection();
-          } else if (socket && reconnectMissCount >= 4) {
+            knownUrl || (reconnectMissCount % 3 === 0 ? await findCMS() : "");
+
+          if (discoveredUrl) {
+            if (
+              socket &&
+              socketUrlRef.current &&
+              discoveredUrl !== socketUrlRef.current
+            ) {
+              resetSocketConnection();
+            }
+            await setServer(discoveredUrl);
+          } else if (socket && reconnectMissCount >= 2) {
             resetSocketConnection();
           }
         } catch {
@@ -1218,6 +1212,15 @@ export default function App() {
           );
           setReady(true);
         }
+        if (isMounted && !cachedConfig && !cachedMedia) {
+          setConnectTexts(
+            restoredServer
+              ? "Trying saved CMS. Showing no media until content is available"
+              : "Searching CMS. Showing no media until content is available",
+            "Background scan"
+          );
+          setReady(true);
+        }
         if (ENABLE_NETWORK_RECOVERY_LOOP) checkAndRecoverNetwork();
         if (restoredServer) {
           setConnectTexts(`Reconnecting to saved CMS at ${restoredServer}`, "Reconnecting");
@@ -1298,9 +1301,9 @@ export default function App() {
           setSectionPlaybackTimeline(normalizePlaybackTimeline(loadedConfig?.playbackTimeline));
           if (!loadedConfig) {
             emitDeviceError("config", "Config unavailable from server and local cache");
-            setConnectTexts("Config unavailable. Retrying automatically", "Config retry");
+            setConnectTexts("Config unavailable. Showing no media while retrying", "Config retry");
             resetSocketConnection();
-            if (isMounted) setReady(false);
+            if (isMounted) setReady(true);
             scheduleInitRetry();
             return;
           }
@@ -1563,6 +1566,7 @@ export default function App() {
             "Offline mode"
           );
           reconnectMissCount = 0;
+          resetSocketConnection();
           startReconnectLoop();
           startDisconnectRecovery(`disconnect:${String(reason)}`);
         });
@@ -1575,6 +1579,7 @@ export default function App() {
             "Offline mode"
           );
           reconnectMissCount = Math.max(reconnectMissCount, 1);
+          resetSocketConnection();
           startReconnectLoop();
           emitDeviceError("connect-error", err?.message || "unknown");
           startDisconnectRecovery(`connect_error:${err?.message || "unknown"}`);

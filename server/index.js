@@ -323,6 +323,17 @@ function nowIso() {
   return new Date().toISOString();
 }
 
+function getLiveDeviceIds() {
+  const ids = new Set(Object.keys(connectedDevices || {}).filter(Boolean));
+  Object.values(deviceStatus || {}).forEach((item) => {
+    const deviceId = String(item?.deviceId || "").trim();
+    if (deviceId && item?.online) {
+      ids.add(deviceId);
+    }
+  });
+  return ids;
+}
+
 function upsertDeviceStatus(deviceId, patch = {}) {
   if (!deviceId) return;
   const groups = getGroupsForDevice(deviceId);
@@ -455,7 +466,7 @@ io.on("connection", (socket) => {
 // Connected device IDs
 app.get("/devices", (req, res) => {
   if (!isApiAuthed(req)) return res.status(401).json({ ok: false, error: "unauthorized" });
-  const liveDeviceIds = new Set(Object.keys(connectedDevices || {}).filter(Boolean));
+  const liveDeviceIds = getLiveDeviceIds();
   const devices = listDevicesWithProfiles(deviceStatus, connectedDevices).filter(
     (item) => liveDeviceIds.has(item.deviceId)
   );
@@ -465,8 +476,7 @@ app.get("/devices", (req, res) => {
       deviceIds: (Array.isArray(group.deviceIds) ? group.deviceIds : []).filter((deviceId) =>
         liveDeviceIds.has(deviceId)
       ),
-    }))
-    .filter((group) => group.deviceIds.length > 0);
+    }));
   res.json({
     devices,
     groups,
@@ -476,7 +486,7 @@ app.get("/devices", (req, res) => {
 // Live health/error status for CMS
 app.get("/device-status", (req, res) => {
   if (!isApiAuthed(req)) return res.status(401).json({ ok: false, error: "unauthorized" });
-  const liveDeviceIds = new Set(Object.keys(connectedDevices || {}).filter(Boolean));
+  const liveDeviceIds = getLiveDeviceIds();
   const devices = listDevicesWithProfiles(deviceStatus, connectedDevices).filter(
     (item) => liveDeviceIds.has(item.deviceId)
   );

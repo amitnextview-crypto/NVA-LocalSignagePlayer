@@ -67,6 +67,17 @@ async function saveAndReturn(url: string): Promise<string> {
   return url;
 }
 
+async function getDirectCandidates(): Promise<string[]> {
+  const saved = normalizeUrl(String((await AsyncStorage.getItem(SERVER_KEY)) || ""));
+  const lastGood = normalizeUrl(
+    String((await AsyncStorage.getItem(LAST_GOOD_SERVER_KEY)) || "")
+  );
+  const history = await readServerHistory();
+  return Array.from(
+    new Set([normalizeUrl(SERVER), saved, lastGood, ...history].filter((value) => value && !isLocalhostUrl(value)))
+  );
+}
+
 function parseIpv4Parts(value: string): number[] {
   const parts = String(value || "")
     .split(".")
@@ -215,23 +226,7 @@ async function collectSubnetBases(savedCandidates: string[]): Promise<{
 }
 
 export async function findCMS(): Promise<string> {
-  // 1) Try in-memory value first.
-  if (SERVER) {
-    const current = normalizeUrl(SERVER);
-    if (current && !isLocalhostUrl(current) && (await probeCMS(current))) {
-      return saveAndReturn(current);
-    }
-  }
-
-  // 2) Try saved server URL.
-  const saved = normalizeUrl(String((await AsyncStorage.getItem(SERVER_KEY)) || ""));
-  const lastGood = normalizeUrl(
-    String((await AsyncStorage.getItem(LAST_GOOD_SERVER_KEY)) || "")
-  );
-  const history = await readServerHistory();
-  const directCandidates = Array.from(
-    new Set([saved, lastGood, ...history].filter((value) => value && !isLocalhostUrl(value)))
-  );
+  const directCandidates = await getDirectCandidates();
 
   for (const candidate of directCandidates) {
     if (await probeCMS(candidate)) {
@@ -239,6 +234,7 @@ export async function findCMS(): Promise<string> {
     }
   }
 
+  const saved = normalizeUrl(String((await AsyncStorage.getItem(SERVER_KEY)) || ""));
   if (saved) {
     if (isLocalhostUrl(saved)) {
       await AsyncStorage.removeItem(SERVER_KEY);
@@ -278,6 +274,16 @@ export async function restoreServerFromStorage(): Promise<string> {
   if (lastGood && !isLocalhostUrl(lastGood)) {
     SERVER = lastGood;
     return lastGood;
+  }
+  return "";
+}
+
+export async function findKnownCMS(): Promise<string> {
+  const directCandidates = await getDirectCandidates();
+  for (const candidate of directCandidates) {
+    if (await probeCMS(candidate)) {
+      return saveAndReturn(candidate);
+    }
   }
   return "";
 }

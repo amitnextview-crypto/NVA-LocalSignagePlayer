@@ -6,6 +6,7 @@ const {
   getPlaybackTimeline,
   clearDeviceTimeline,
   clearAllTimelines,
+  updateSectionTimeline,
 } = require("../services/playbackTimeline");
 const {
   parseTargetValue,
@@ -44,6 +45,110 @@ function ensureDir(dirPath) {
   if (!fs.existsSync(dirPath)) {
     fs.mkdirSync(dirPath, { recursive: true });
   }
+}
+
+function activeSectionCountForLayout(layout) {
+  if (String(layout || "") === "grid3") return 3;
+  if (String(layout || "") === "grid2") return 2;
+  return 1;
+}
+
+function listKnownServerDeviceIds() {
+  const ids = new Set();
+
+  try {
+    const configFiles = fs.existsSync(CONFIG_DIR) ? fs.readdirSync(CONFIG_DIR) : [];
+    configFiles.forEach((file) => {
+      if (!file.endsWith(".json") || file === "default.json") return;
+      const deviceId = sanitizeDeviceId(path.basename(file, ".json"));
+      if (deviceId) ids.add(deviceId);
+    });
+  } catch {
+  }
+
+  try {
+    const uploadDirs = fs.existsSync(UPLOADS_DIR) ? fs.readdirSync(UPLOADS_DIR) : [];
+    uploadDirs.forEach((name) => {
+      if (["all", "fallbacks", "updates"].includes(String(name || "").toLowerCase())) return;
+      const deviceId = sanitizeDeviceId(name);
+      if (deviceId) ids.add(deviceId);
+    });
+  } catch {
+  }
+
+  return Array.from(ids);
+}
+
+function clearSectionServerData(deviceId, section) {
+  const rawDeviceId = String(deviceId || "").trim();
+  const safeDeviceId = rawDeviceId === "all" ? "all" : sanitizeDeviceId(rawDeviceId);
+  const safeSection = Number(section || 0);
+  if (!safeDeviceId || !Number.isInteger(safeSection) || safeSection < 1 || safeSection > 3) {
+    return;
+  }
+
+  const sectionBase = path.join(UPLOADS_DIR, safeDeviceId, `section${safeSection}`);
+  const versionsDir = `${sectionBase}__versions`;
+  const activeFile = `${sectionBase}__active.txt`;
+  const clearedFile = `${sectionBase}__cleared.txt`;
+
+  [sectionBase, versionsDir].forEach((targetPath) => {
+    try {
+      if (fs.existsSync(targetPath)) {
+        fs.rmSync(targetPath, { recursive: true, force: true });
+      }
+    } catch {
+    }
+  });
+
+  [activeFile, clearedFile].forEach((targetPath) => {
+    try {
+      if (fs.existsSync(targetPath)) {
+        fs.rmSync(targetPath, { force: true });
+      }
+    } catch {
+    }
+  });
+}
+
+function cleanupInactiveSectionsForDevice(deviceId, config) {
+  const safeDeviceId = sanitizeDeviceId(deviceId);
+  if (!safeDeviceId) return;
+
+  const activeCount = activeSectionCountForLayout(config?.layout);
+  for (let section = activeCount + 1; section <= 3; section += 1) {
+    clearSectionServerData(safeDeviceId, section);
+    updateSectionTimeline(safeDeviceId, section, {
+      targetDevice: safeDeviceId,
+      syncAt: Date.now(),
+      updatedAt: Date.now(),
+      cycleId: `${section}-cleared-${Date.now()}`,
+      fileCount: 0,
+      mediaSignature: "",
+    });
+  }
+}
+
+function cleanupInactiveSectionsForTarget(target, config) {
+  if (target.type === "all") {
+    const activeCount = activeSectionCountForLayout(config?.layout);
+    for (let section = activeCount + 1; section <= 3; section += 1) {
+      clearSectionServerData("all", section);
+      updateSectionTimeline("all", section, {
+        targetDevice: "all",
+        syncAt: Date.now(),
+        updatedAt: Date.now(),
+        cycleId: `${section}-cleared-${Date.now()}`,
+        fileCount: 0,
+        mediaSignature: "",
+      });
+    }
+    listKnownServerDeviceIds().forEach((deviceId) => cleanupInactiveSectionsForDevice(deviceId, config));
+    return;
+  }
+
+  const deviceIds = target.type === "group" ? getTargetDevices(`group:${target.value}`) : [target.value];
+  deviceIds.forEach((deviceId) => cleanupInactiveSectionsForDevice(deviceId, config));
 }
 
 function clearDeviceServerData(deviceId) {
@@ -296,6 +401,7 @@ router.post("/", (req, res) => {
         fs.writeFileSync(devicePath, JSON.stringify(config, null, 2));
       }
     });
+    cleanupInactiveSectionsForTarget(target, config);
 
     if (global.io) {
       global.io.emit("config-updated");
@@ -305,6 +411,7 @@ router.post("/", (req, res) => {
       const devicePath = path.join(CONFIG_DIR, `${deviceId}.json`);
       fs.writeFileSync(devicePath, JSON.stringify(config, null, 2));
     });
+    cleanupInactiveSectionsForTarget(target, config);
     emitToTarget(targetDevice, "config-updated");
   }
 
