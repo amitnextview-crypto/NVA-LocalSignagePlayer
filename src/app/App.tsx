@@ -38,8 +38,10 @@ import {
   findCMS,
   findKnownCMS,
   getServer,
+  refreshCMSDiscovery,
   restoreServerFromStorage,
   setServer,
+  subscribeToServerChanges,
 } from "../services/serverService";
 
 let socket: Socket | null = null;
@@ -1060,7 +1062,7 @@ export default function App() {
           reconnectMissCount += 1;
           const knownUrl = await findKnownCMS();
           const discoveredUrl =
-            knownUrl || (reconnectMissCount % 3 === 0 ? await findCMS() : "");
+            knownUrl || (reconnectMissCount <= 2 ? await findCMS() : await refreshCMSDiscovery());
 
           if (discoveredUrl) {
             if (
@@ -1071,8 +1073,10 @@ export default function App() {
               resetSocketConnection();
             }
             await setServer(discoveredUrl);
+            setConnectTexts(`CMS found at ${discoveredUrl}. Reconnecting`, "CMS discovered");
           } else if (socket && reconnectMissCount >= 2) {
             resetSocketConnection();
+            setConnectTexts("Searching local network for CMS server", "Network scan running");
           }
         } catch {
         }
@@ -1084,6 +1088,19 @@ export default function App() {
       if (!reconnectTimer) return;
       clearInterval(reconnectTimer);
       reconnectTimer = null;
+    };
+
+    const handleServerChange = async (nextUrl: string) => {
+      const normalized = String(nextUrl || "").trim();
+      if (!normalized || !isMounted) return;
+      if (normalized === socketUrlRef.current && socket?.connected) return;
+      pushDiagnosticEvent("cms", `Manual CMS change: ${normalized}`);
+      setConnectTexts(`Switching to CMS at ${normalized}`, "Reconnecting");
+      reconnectMissCount = 0;
+      clearDisconnectRecovery();
+      resetSocketConnection();
+      await wait(150);
+      await init();
     };
 
     const scheduleInitRetry = () => {
@@ -1209,8 +1226,7 @@ export default function App() {
 
         console.log("Data cleared");
         await emitDeviceHealthSnapshot("clear-data", {}, { forceStorageScan: true });
-        const { DevSettings } = require("react-native");
-        DevSettings.reload();
+        safeRestartApp("clear-data");
       } catch (e) {
         console.log("Clear failed", e);
         emitDeviceError("clear-data", `Clear failed: ${String((e as any)?.message || e)}`);
@@ -1644,6 +1660,11 @@ export default function App() {
     startNetworkRecoveryLoop();
     startReconnectLoop();
     startOfflineNoticeLoop();
+    const unsubscribeServerChanges = subscribeToServerChanges((url) => {
+      handleServerChange(url).catch(() => {
+        // ignore manual reconnect errors
+      });
+    });
     deferredStartTimer = setTimeout(() => {
       startNetworkQualityLoop();
       startSelfHealSyncLoop();
@@ -1660,6 +1681,7 @@ export default function App() {
       stopCacheGuardLoop();
       stopReconnectLoop();
       stopOfflineNoticeLoop();
+      unsubscribeServerChanges();
       if (deferredStartTimer) {
         clearTimeout(deferredStartTimer);
         deferredStartTimer = null;

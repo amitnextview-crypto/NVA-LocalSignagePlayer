@@ -5,13 +5,22 @@ let SERVER = "";
 const SERVER_KEY = "CMS_SERVER";
 const LAST_GOOD_SERVER_KEY = "CMS_SERVER_LAST_GOOD";
 const SERVER_HISTORY_KEY = "CMS_SERVER_HISTORY_V1";
-const FETCH_TIMEOUT = 1500;
+const FETCH_TIMEOUT = 2500;
 const SCAN_BATCH_SIZE = 48;
 const CMS_PORT = 8080;
+const SCAN_COOLDOWN_MS = 4000;
+const serverListeners = new Set<(url: string) => void>();
+let inFlightFindCMS: Promise<string> | null = null;
+let lastScanAt = 0;
 
 function fetchWithTimeout(url: string, timeout = FETCH_TIMEOUT): Promise<Response> {
   return Promise.race([
-    fetch(url),
+    fetch(url, {
+      headers: {
+        "Cache-Control": "no-cache",
+        Pragma: "no-cache",
+      },
+    }),
     new Promise<Response>((_, reject) =>
       setTimeout(() => reject(new Error("timeout")), timeout)
     ),
@@ -19,7 +28,10 @@ function fetchWithTimeout(url: string, timeout = FETCH_TIMEOUT): Promise<Respons
 }
 
 function normalizeUrl(value: string): string {
-  return String(value || "").trim().replace(/\/+$/, "");
+  const trimmed = String(value || "").trim();
+  if (!trimmed) return "";
+  const withProtocol = /^[a-z]+:\/\//i.test(trimmed) ? trimmed : `http://${trimmed}`;
+  return withProtocol.replace(/\/+$/, "");
 }
 
 function isLocalhostUrl(value: string): boolean {
@@ -27,14 +39,36 @@ function isLocalhostUrl(value: string): boolean {
   return url.includes("127.0.0.1") || url.includes("localhost");
 }
 
-async function probeCMS(url: string): Promise<boolean> {
+function notifyServerListeners(url: string) {
+  serverListeners.forEach((listener) => {
+    try {
+      listener(url);
+    } catch {
+      // ignore listener failures
+    }
+  });
+}
+
+async function probeCMS(url: string, timeout = FETCH_TIMEOUT): Promise<boolean> {
   const checks = await Promise.allSettled([
-    fetchWithTimeout(`${url}/ping`, FETCH_TIMEOUT),
-    fetchWithTimeout(`${url}/config`, FETCH_TIMEOUT + 500),
+    fetchWithTimeout(`${url}/ping?ts=${Date.now()}`, timeout),
+    fetchWithTimeout(`${url}/config?ts=${Date.now()}`, timeout + 750),
   ]);
   return checks.some(
     (item) => item.status === "fulfilled" && !!item.value?.ok
   );
+}
+
+export async function verifyCMS(url: string, timeout = 4000): Promise<{
+  normalizedUrl: string;
+  ok: boolean;
+}> {
+  const normalizedUrl = normalizeUrl(url);
+  if (!normalizedUrl || isLocalhostUrl(normalizedUrl)) {
+    return { normalizedUrl, ok: false };
+  }
+  const ok = await probeCMS(normalizedUrl, timeout);
+  return { normalizedUrl, ok };
 }
 
 async function readServerHistory(): Promise<string[]> {
@@ -60,11 +94,14 @@ async function rememberServer(url: string) {
 }
 
 async function saveAndReturn(url: string): Promise<string> {
-  SERVER = url;
-  await AsyncStorage.setItem(SERVER_KEY, url);
-  await AsyncStorage.setItem(LAST_GOOD_SERVER_KEY, url);
-  await rememberServer(url);
-  return url;
+  const normalized = normalizeUrl(url);
+  const changed = normalized !== SERVER;
+  SERVER = normalized;
+  await AsyncStorage.setItem(SERVER_KEY, normalized);
+  await AsyncStorage.setItem(LAST_GOOD_SERVER_KEY, normalized);
+  await rememberServer(normalized);
+  if (changed) notifyServerListeners(normalized);
+  return normalized;
 }
 
 async function getDirectCandidates(): Promise<string[]> {
@@ -225,7 +262,7 @@ async function collectSubnetBases(savedCandidates: string[]): Promise<{
   };
 }
 
-export async function findCMS(): Promise<string> {
+async function discoverCMS(forceScan = false): Promise<string> {
   const directCandidates = await getDirectCandidates();
 
   for (const candidate of directCandidates) {
@@ -241,7 +278,12 @@ export async function findCMS(): Promise<string> {
     }
   }
 
-  // 3) Auto scan local network.
+  if (!forceScan && Date.now() - lastScanAt < SCAN_COOLDOWN_MS) {
+    return "";
+  }
+
+  lastScanAt = Date.now();
+
   try {
     const { bases, hostHints } = await collectSubnetBases(directCandidates);
     for (const base of bases) {
@@ -257,8 +299,25 @@ export async function findCMS(): Promise<string> {
   return "";
 }
 
+export async function findCMS(): Promise<string> {
+  if (inFlightFindCMS) return inFlightFindCMS;
+  inFlightFindCMS = discoverCMS(false);
+  try {
+    return await inFlightFindCMS;
+  } finally {
+    inFlightFindCMS = null;
+  }
+}
+
 export function getServer(): string {
   return SERVER;
+}
+
+export function subscribeToServerChanges(listener: (url: string) => void) {
+  serverListeners.add(listener);
+  return () => {
+    serverListeners.delete(listener);
+  };
 }
 
 /** Restore last known server URL from storage so cached media list and URLs work when CMS is offline. */
@@ -288,11 +347,26 @@ export async function findKnownCMS(): Promise<string> {
   return "";
 }
 
-export async function setServer(url: string) {
+export async function setServer(
+  url: string,
+  options: { forceNotify?: boolean } = {}
+) {
   const normalized = normalizeUrl(url);
+  const changed = normalized !== SERVER;
   SERVER = normalized;
   await AsyncStorage.setItem(SERVER_KEY, normalized);
   await AsyncStorage.setItem(LAST_GOOD_SERVER_KEY, normalized);
   await rememberServer(normalized);
+  if (changed || options.forceNotify) notifyServerListeners(normalized);
+}
+
+export async function refreshCMSDiscovery(): Promise<string> {
+  if (inFlightFindCMS) return inFlightFindCMS;
+  inFlightFindCMS = discoverCMS(true);
+  try {
+    return await inFlightFindCMS;
+  } finally {
+    inFlightFindCMS = null;
+  }
 }
 
