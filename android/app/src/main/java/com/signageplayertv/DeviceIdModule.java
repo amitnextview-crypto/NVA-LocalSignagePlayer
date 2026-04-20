@@ -35,6 +35,7 @@ import com.facebook.react.modules.core.DeviceEventManagerModule;
 public class DeviceIdModule extends ReactContextBaseJavaModule {
     private static final String PREFS_NAME = "kiosk_prefs";
     private static final String KEY_AUTO_REOPEN_ENABLED = "auto_reopen_enabled";
+    private static final String KEY_AUTO_REOPEN_LOCKED_OFF = "auto_reopen_locked_off";
     private static final String KEY_VIDEO_CACHE_MAX_BYTES = "video_cache_max_bytes";
     private static final int MAIN_REOPEN_REQ_CODE = 7201;
     private static final int SERVICE_REOPEN_REQ_CODE = 7202;
@@ -125,7 +126,8 @@ public class DeviceIdModule extends ReactContextBaseJavaModule {
         android.content.SharedPreferences.Editor editor = context
                 .getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
                 .edit()
-                .putBoolean(KEY_AUTO_REOPEN_ENABLED, enabled);
+                .putBoolean(KEY_AUTO_REOPEN_ENABLED, enabled)
+                .putBoolean(KEY_AUTO_REOPEN_LOCKED_OFF, !enabled);
         editor.commit();
 
         if (!enabled) {
@@ -140,6 +142,16 @@ public class DeviceIdModule extends ReactContextBaseJavaModule {
                         } catch (Exception ignored) {
                         }
                     });
+                }
+            } catch (Exception ignored) {
+            }
+        } else {
+            try {
+                Intent serviceIntent = new Intent(context, KioskKeepAliveService.class);
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    context.startForegroundService(serviceIntent);
+                } else {
+                    context.startService(serviceIntent);
                 }
             } catch (Exception ignored) {
             }

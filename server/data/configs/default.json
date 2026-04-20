@@ -29,7 +29,7 @@
   "ticker": {
     "text": "Breaking News: NextView Premium Product New Update Available!",
     "color": "#ffffff",
-    "bgColor": "#e62828",
+    "bgColor": "#7f1010",
     "speed": 6,
     "fontSize": 24,
     "position": "bottom"

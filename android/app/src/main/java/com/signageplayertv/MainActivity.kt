@@ -25,6 +25,7 @@ class MainActivity : ReactActivity() {
     private const val REOPEN_REQ_CODE = 7201
     private const val PREFS_NAME = "kiosk_prefs"
     private const val KEY_AUTO_REOPEN_ENABLED = "auto_reopen_enabled"
+    private const val KEY_AUTO_REOPEN_LOCKED_OFF = "auto_reopen_locked_off"
     private const val EXTRA_SKIP_AUTO_REOPEN_RESTORE_ONCE = "skip_auto_reopen_restore_once"
   }
 
@@ -191,7 +192,7 @@ override fun onWindowFocusChanged(hasFocus: Boolean) {
     // Long-press OK/Center: toggle auto reopen ON/OFF.
     if (keyCode == KeyEvent.KEYCODE_DPAD_CENTER || keyCode == KeyEvent.KEYCODE_ENTER) {
       val enabled = !isAutoReopenEnabled()
-      setAutoReopenEnabled(enabled)
+      setAutoReopenEnabled(enabled, !enabled)
       if (!enabled) {
         cancelScheduledReopen()
       }
@@ -219,7 +220,17 @@ override fun onWindowFocusChanged(hasFocus: Boolean) {
       if (skipAutoReopenRestoreThisLaunch) {
         return
       }
-      setAutoReopenEnabled(true)
+      val prefs = getPrefs()
+      if (!prefs.contains(KEY_AUTO_REOPEN_ENABLED)) {
+        prefs.edit()
+          .putBoolean(KEY_AUTO_REOPEN_ENABLED, true)
+          .putBoolean(KEY_AUTO_REOPEN_LOCKED_OFF, false)
+          .apply()
+        return
+      }
+      if (prefs.getBoolean(KEY_AUTO_REOPEN_LOCKED_OFF, false)) {
+        prefs.edit().putBoolean(KEY_AUTO_REOPEN_ENABLED, false).apply()
+      }
     } catch (_: Exception) {
     }
   }
@@ -228,15 +239,16 @@ override fun onWindowFocusChanged(hasFocus: Boolean) {
     return getPrefs().getBoolean(KEY_AUTO_REOPEN_ENABLED, true)
   }
 
-  private fun setAutoReopenEnabled(enabled: Boolean) {
-    getPrefs().edit().putBoolean(KEY_AUTO_REOPEN_ENABLED, enabled).apply()
+  private fun setAutoReopenEnabled(enabled: Boolean, lockDisabledState: Boolean = false) {
+    getPrefs().edit()
+      .putBoolean(KEY_AUTO_REOPEN_ENABLED, enabled)
+      .putBoolean(KEY_AUTO_REOPEN_LOCKED_OFF, !enabled && lockDisabledState)
+      .apply()
   }
 
   private fun clearSignageDataAndRestart() {
     try {
-      getPrefs().edit()
-        .putBoolean(KEY_AUTO_REOPEN_ENABLED, false)
-        .apply()
+      setAutoReopenEnabled(false, true)
       cancelScheduledReopen()
 
       // Remove app-level signage files without full "clear data" settings flow.

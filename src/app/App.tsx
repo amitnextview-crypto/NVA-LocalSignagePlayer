@@ -49,7 +49,7 @@ const NETWORK_QUALITY_CHECK_INTERVAL_MS = 15000;
 const NETWORK_QUALITY_SLOW_MS = 1800;
 const NETWORK_QUALITY_VERY_SLOW_MS = 3500;
 const SELF_HEAL_SYNC_INTERVAL_MS = 120000;
-const RECONNECT_RETRY_INTERVAL_MS = 3000;
+const RECONNECT_RETRY_INTERVAL_MS = 2000;
 const ENABLE_AUTO_WIFI_RECOVERY = false;
 const ENABLE_NETWORK_RECOVERY_LOOP = false;
 const OFFLINE_NOTICE_POLL_MS = 3000;
@@ -68,6 +68,7 @@ const SMALL_CACHE_BLOCK_BYTES = 30 * 1024 * 1024;
 const STARTUP_DEFER_MS = 2500;
 const MAX_DIAGNOSTIC_EVENTS = 24;
 const DEVICE_META_CACHE_MS = 30000;
+const ACTIVATION_FOCUS_DELAY_MS = 350;
 
 type RuntimeErrorInfo = {
   message: string;
@@ -154,6 +155,7 @@ export default function App() {
   const [licenseInput, setLicenseInput] = useState("");
   const [licenseStatus, setLicenseStatus] = useState("Checking activation...");
   const [licenseBusy, setLicenseBusy] = useState(false);
+  const [licenseFocusTarget, setLicenseFocusTarget] = useState<"input" | "button">("input");
   const [lastError, setLastError] = useState<RuntimeErrorInfo | null>(null);
   const [offlineNotice, setOfflineNotice] = useState("");
   const [uploadProcessingBySection, setUploadProcessingBySection] = useState<
@@ -177,6 +179,7 @@ export default function App() {
     visible: false,
   });
   const socketUrlRef = useRef("");
+  const licenseInputRef = useRef<TextInput | null>(null);
   const initAttemptIdRef = useRef(0);
   const playbackBySectionRef = useRef<Record<number, any>>({});
   const lastMetaRef = useRef<any | null>(null);
@@ -700,6 +703,33 @@ export default function App() {
     };
   }, [bootReady]);
 
+  const focusLicenseInput = () => {
+    setLicenseFocusTarget("input");
+    setTimeout(() => {
+      licenseInputRef.current?.focus();
+    }, 0);
+  };
+
+  const focusLicenseButton = () => {
+    setLicenseFocusTarget("button");
+    licenseInputRef.current?.blur();
+  };
+
+  useEffect(() => {
+    if (!bootReady || !licenseReady || licensed) return;
+    const timer = setTimeout(() => {
+      focusLicenseInput();
+    }, ACTIVATION_FOCUS_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, [bootReady, licenseReady, licensed]);
+
+  const handleLicenseInputKeyPress = (event: any) => {
+    const key = String(event?.nativeEvent?.key || "").toLowerCase();
+    if (key === "arrowdown" || key === "arrowright") {
+      focusLicenseButton();
+    }
+  };
+
   const onActivateLicense = async () => {
     if (licenseBusy) return;
     setLicenseBusy(true);
@@ -708,6 +738,8 @@ export default function App() {
     setLicenseStatus(result.message);
     if (result.success) {
       setLicenseInput(String(licenseInput || "").trim().toUpperCase());
+      setConnectSubtitleText("License activated. Searching CMS on local network...");
+      setConnectStatusText("Fast scan running");
       setLicensed(true);
       setReady(false);
     }
@@ -1700,21 +1732,35 @@ export default function App() {
           <View style={styles.licenseRow}>
             <Text style={styles.licenseLabel}>License Key</Text>
             <TextInput
+              ref={licenseInputRef}
               value={licenseInput}
               onChangeText={setLicenseInput}
+              onFocus={() => setLicenseFocusTarget("input")}
               autoCapitalize="characters"
               autoCorrect={false}
+              autoFocus
+              blurOnSubmit={false}
+              returnKeyType="done"
+              onSubmitEditing={onActivateLicense}
+              onKeyPress={handleLicenseInputKeyPress}
+              hasTVPreferredFocus={licenseFocusTarget === "input"}
               placeholder="Enter key"
               placeholderTextColor="rgba(210,220,232,0.45)"
-              style={styles.licenseInput}
+              style={[
+                styles.licenseInput,
+                licenseFocusTarget === "input" ? styles.licenseInputFocused : null,
+              ]}
             />
           </View>
 
           <Pressable
             onPress={onActivateLicense}
+            onFocus={() => setLicenseFocusTarget("button")}
+            focusable
             disabled={licenseBusy}
             style={({ pressed }) => [
               styles.licenseBtn,
+              licenseFocusTarget === "button" ? styles.licenseBtnFocused : null,
               pressed && !licenseBusy ? { opacity: 0.85 } : null,
               licenseBusy ? { opacity: 0.55 } : null,
             ]}
@@ -2099,12 +2145,25 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     letterSpacing: 0.4,
   },
+  licenseInputFocused: {
+    borderColor: "#52d8b3",
+    shadowColor: "#52d8b3",
+    shadowOpacity: 0.35,
+    shadowRadius: 10,
+    elevation: 6,
+  },
   licenseBtn: {
     marginTop: 18,
     backgroundColor: "#1d8fff",
     borderRadius: 12,
     paddingVertical: 12,
+    borderWidth: 1,
+    borderColor: "transparent",
     alignItems: "center",
+  },
+  licenseBtnFocused: {
+    borderColor: "#7fffd4",
+    backgroundColor: "#1591ff",
   },
   licenseBtnText: {
     color: "#ffffff",

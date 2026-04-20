@@ -455,16 +455,31 @@ io.on("connection", (socket) => {
 // Connected device IDs
 app.get("/devices", (req, res) => {
   if (!isApiAuthed(req)) return res.status(401).json({ ok: false, error: "unauthorized" });
+  const liveDeviceIds = new Set(Object.keys(connectedDevices || {}).filter(Boolean));
+  const devices = listDevicesWithProfiles(deviceStatus, connectedDevices).filter(
+    (item) => liveDeviceIds.has(item.deviceId)
+  );
+  const groups = listGroups()
+    .map((group) => ({
+      ...group,
+      deviceIds: (Array.isArray(group.deviceIds) ? group.deviceIds : []).filter((deviceId) =>
+        liveDeviceIds.has(deviceId)
+      ),
+    }))
+    .filter((group) => group.deviceIds.length > 0);
   res.json({
-    devices: listDevicesWithProfiles(deviceStatus, connectedDevices),
-    groups: listGroups(),
+    devices,
+    groups,
   });
 });
 
 // Live health/error status for CMS
 app.get("/device-status", (req, res) => {
   if (!isApiAuthed(req)) return res.status(401).json({ ok: false, error: "unauthorized" });
-  const devices = listDevicesWithProfiles(deviceStatus, connectedDevices);
+  const liveDeviceIds = new Set(Object.keys(connectedDevices || {}).filter(Boolean));
+  const devices = listDevicesWithProfiles(deviceStatus, connectedDevices).filter(
+    (item) => liveDeviceIds.has(item.deviceId)
+  );
   const statusMap = new Map(Object.values(deviceStatus).map((item) => [item.deviceId, item]));
   const list = devices
     .map((profile) => {

@@ -27,6 +27,29 @@ public class BootReceiver extends BroadcastReceiver {
     private static final String ACTION_LOCKED_BOOT_COMPLETED = "android.intent.action.LOCKED_BOOT_COMPLETED";
     private static final String ACTION_QUICKBOOT_POWERON = "android.intent.action.QUICKBOOT_POWERON";
 
+    private Intent buildLaunchIntent(Context context) {
+        Intent launchIntent = context.getPackageManager().getLaunchIntentForPackage(context.getPackageName());
+        if (launchIntent != null) {
+            launchIntent.addFlags(
+                    Intent.FLAG_ACTIVITY_NEW_TASK
+                            | Intent.FLAG_ACTIVITY_CLEAR_TOP
+                            | Intent.FLAG_ACTIVITY_SINGLE_TOP
+            );
+            return launchIntent;
+        }
+
+        Intent fallback = new Intent(context, MainActivity.class);
+        fallback.setAction(Intent.ACTION_MAIN);
+        fallback.addCategory(Intent.CATEGORY_LAUNCHER);
+        fallback.addCategory(Intent.CATEGORY_LEANBACK_LAUNCHER);
+        fallback.addFlags(
+                Intent.FLAG_ACTIVITY_NEW_TASK
+                        | Intent.FLAG_ACTIVITY_CLEAR_TOP
+                        | Intent.FLAG_ACTIVITY_SINGLE_TOP
+        );
+        return fallback;
+    }
+
     @Override
     public void onReceive(Context context, Intent intent) {
         String action = intent != null ? intent.getAction() : "";
@@ -49,16 +72,7 @@ public class BootReceiver extends BroadcastReceiver {
                 Log.e("BOOT", "Failed to start keep alive service", e);
             }
 
-            Intent i = new Intent(context, MainActivity.class);
-            i.setAction(Intent.ACTION_MAIN);
-            i.addCategory(Intent.CATEGORY_HOME);
-            i.addCategory(Intent.CATEGORY_DEFAULT);
-            i.addCategory(Intent.CATEGORY_LEANBACK_LAUNCHER);
-            i.addFlags(
-                    Intent.FLAG_ACTIVITY_NEW_TASK
-                            | Intent.FLAG_ACTIVITY_CLEAR_TOP
-                            | Intent.FLAG_ACTIVITY_SINGLE_TOP
-            );
+            Intent i = buildLaunchIntent(context);
 
             if (i != null) {
                 context.startActivity(i);

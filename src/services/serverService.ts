@@ -4,8 +4,9 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 let SERVER = "";
 const SERVER_KEY = "CMS_SERVER";
 const LAST_GOOD_SERVER_KEY = "CMS_SERVER_LAST_GOOD";
-const FETCH_TIMEOUT = 2500;
-const SCAN_BATCH_SIZE = 32;
+const SERVER_HISTORY_KEY = "CMS_SERVER_HISTORY_V1";
+const FETCH_TIMEOUT = 1500;
+const SCAN_BATCH_SIZE = 48;
 const CMS_PORT = 8080;
 
 function fetchWithTimeout(url: string, timeout = FETCH_TIMEOUT): Promise<Response> {
@@ -27,23 +28,42 @@ function isLocalhostUrl(value: string): boolean {
 }
 
 async function probeCMS(url: string): Promise<boolean> {
-  try {
-    const pingRes = await fetchWithTimeout(`${url}/ping`, FETCH_TIMEOUT);
-    if (pingRes?.ok) return true;
-  } catch {}
+  const checks = await Promise.allSettled([
+    fetchWithTimeout(`${url}/ping`, FETCH_TIMEOUT),
+    fetchWithTimeout(`${url}/config`, FETCH_TIMEOUT + 500),
+  ]);
+  return checks.some(
+    (item) => item.status === "fulfilled" && !!item.value?.ok
+  );
+}
 
+async function readServerHistory(): Promise<string[]> {
   try {
-    const configRes = await fetchWithTimeout(`${url}/config`, FETCH_TIMEOUT);
-    return !!configRes?.ok;
+    const raw = String((await AsyncStorage.getItem(SERVER_HISTORY_KEY)) || "").trim();
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .map((item) => normalizeUrl(String(item || "")))
+      .filter((item) => item && !isLocalhostUrl(item));
   } catch {
-    return false;
+    return [];
   }
+}
+
+async function rememberServer(url: string) {
+  const normalized = normalizeUrl(url);
+  if (!normalized || isLocalhostUrl(normalized)) return;
+  const existing = await readServerHistory();
+  const next = [normalized, ...existing.filter((item) => item !== normalized)].slice(0, 8);
+  await AsyncStorage.setItem(SERVER_HISTORY_KEY, JSON.stringify(next));
 }
 
 async function saveAndReturn(url: string): Promise<string> {
   SERVER = url;
   await AsyncStorage.setItem(SERVER_KEY, url);
   await AsyncStorage.setItem(LAST_GOOD_SERVER_KEY, url);
+  await rememberServer(url);
   return url;
 }
 
@@ -93,9 +113,13 @@ function buildPriorityHosts(hints: number[]): number[] {
     push(hint + 1);
     push(hint - 2);
     push(hint + 2);
+    push(hint - 3);
+    push(hint + 3);
+    push(hint - 4);
+    push(hint + 4);
   }
 
-  [2, 3, 4, 5, 10, 11, 20, 30, 40, 50, 100, 101, 102, 150, 200].forEach(push);
+  [1, 2, 3, 4, 5, 6, 8, 10, 11, 12, 15, 20, 21, 25, 30, 40, 50, 100, 101, 102, 150, 200].forEach(push);
   for (let i = 1; i < 255; i += 1) push(i);
   return ordered;
 }
@@ -204,8 +228,9 @@ export async function findCMS(): Promise<string> {
   const lastGood = normalizeUrl(
     String((await AsyncStorage.getItem(LAST_GOOD_SERVER_KEY)) || "")
   );
+  const history = await readServerHistory();
   const directCandidates = Array.from(
-    new Set([saved, lastGood].filter((value) => value && !isLocalhostUrl(value)))
+    new Set([saved, lastGood, ...history].filter((value) => value && !isLocalhostUrl(value)))
   );
 
   for (const candidate of directCandidates) {
@@ -262,5 +287,6 @@ export async function setServer(url: string) {
   SERVER = normalized;
   await AsyncStorage.setItem(SERVER_KEY, normalized);
   await AsyncStorage.setItem(LAST_GOOD_SERVER_KEY, normalized);
+  await rememberServer(normalized);
 }
 

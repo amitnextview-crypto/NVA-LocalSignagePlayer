@@ -95,6 +95,11 @@ android {
 }
 
 buildTypes {
+    debug {
+        // Use the same keystore as release so debug installs can upgrade
+        // an existing app on shared devices without signature conflicts.
+        signingConfig signingConfigs.release
+    }
     release {
          signingConfig signingConfigs.release
         minifyEnabled false

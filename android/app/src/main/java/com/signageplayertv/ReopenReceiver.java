@@ -21,12 +21,13 @@ public class ReopenReceiver extends BroadcastReceiver {
                 return;
             }
 
-            Intent launchIntent = new Intent(context, MainActivity.class);
-            launchIntent.setAction(Intent.ACTION_MAIN);
-            launchIntent.addCategory(Intent.CATEGORY_HOME);
-            launchIntent.addCategory(Intent.CATEGORY_DEFAULT);
-            launchIntent.addCategory(Intent.CATEGORY_LEANBACK_LAUNCHER);
-            launchIntent.addCategory(Intent.CATEGORY_LAUNCHER);
+            Intent launchIntent = context.getPackageManager().getLaunchIntentForPackage(context.getPackageName());
+            if (launchIntent == null) {
+                launchIntent = new Intent(context, MainActivity.class);
+                launchIntent.setAction(Intent.ACTION_MAIN);
+                launchIntent.addCategory(Intent.CATEGORY_LAUNCHER);
+                launchIntent.addCategory(Intent.CATEGORY_LEANBACK_LAUNCHER);
+            }
             launchIntent.addFlags(
                     Intent.FLAG_ACTIVITY_NEW_TASK
                             | Intent.FLAG_ACTIVITY_CLEAR_TOP

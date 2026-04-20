@@ -279,6 +279,11 @@ router.post("/", (req, res) => {
   if (target.type === "invalid") {
     return res.status(400).json({ success: false, error: "invalid-device-id" });
   }
+  const scopedDeviceIds =
+    target.type === "group" ? getTargetDevices(targetDevice) : target.type === "device" ? [target.value] : [];
+  if (target.type === "group" && !scopedDeviceIds.length) {
+    return res.status(400).json({ success: false, error: "group-has-no-devices" });
+  }
 
   if (target.type === "all") {
     const defaultPath = DEFAULT_CONFIG_PATH;
@@ -296,9 +301,7 @@ router.post("/", (req, res) => {
       global.io.emit("config-updated");
     }
   } else {
-    const deviceIds =
-      target.type === "group" ? getTargetDevices(targetDevice) : [target.value];
-    deviceIds.forEach((deviceId) => {
+    scopedDeviceIds.forEach((deviceId) => {
       const devicePath = path.join(CONFIG_DIR, `${deviceId}.json`);
       fs.writeFileSync(devicePath, JSON.stringify(config, null, 2));
     });
