@@ -36,6 +36,7 @@ public class DeviceIdModule extends ReactContextBaseJavaModule {
     private static final String PREFS_NAME = "kiosk_prefs";
     private static final String KEY_AUTO_REOPEN_ENABLED = "auto_reopen_enabled";
     private static final String KEY_AUTO_REOPEN_LOCKED_OFF = "auto_reopen_locked_off";
+    private static final String KEY_PENDING_STARTUP_ACTION = "pending_startup_action";
     private static final String KEY_VIDEO_CACHE_MAX_BYTES = "video_cache_max_bytes";
     private static final int MAIN_REOPEN_REQ_CODE = 7201;
     private static final int SERVICE_REOPEN_REQ_CODE = 7202;
@@ -155,6 +156,20 @@ public class DeviceIdModule extends ReactContextBaseJavaModule {
                 }
             } catch (Exception ignored) {
             }
+        }
+    }
+
+    @ReactMethod(isBlockingSynchronousMethod = true)
+    public String consumePendingStartupAction() {
+        try {
+            Context context = reactContext.getApplicationContext();
+            android.content.SharedPreferences prefs =
+                    context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
+            String action = String.valueOf(prefs.getString(KEY_PENDING_STARTUP_ACTION, ""));
+            prefs.edit().remove(KEY_PENDING_STARTUP_ACTION).apply();
+            return action == null ? "" : action.trim();
+        } catch (Exception ignored) {
+            return "";
         }
     }
 

@@ -137,6 +137,7 @@ async function getPathSizeSafe(targetPath: string): Promise<number> {
 
 export default function App() {
   const [bootReady, setBootReady] = useState(false);
+  const [startupActionReady, setStartupActionReady] = useState(false);
   const [showAdmin, setShowAdmin] = useState(false);
   const [ready, setReady] = useState(false);
   const [config, setConfig] = useState<any>(null);
@@ -521,6 +522,43 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    if (!bootReady) return;
+    let mounted = true;
+
+    const runPendingStartupAction = async () => {
+      try {
+        const nativeDeviceModule = (NativeModules as any)?.DeviceIdModule;
+        const action = String(nativeDeviceModule?.consumePendingStartupAction?.() || "").trim();
+        if (action !== "clear-data-keep-identity") {
+          if (mounted) setStartupActionReady(true);
+          return;
+        }
+
+        resetRuntimePlaybackSnapshots();
+        await clearPersistedPlaybackState();
+        await clearNonEssentialStorage();
+        await clearRuntimePlaybackData();
+        await clearRuntimeTransientCache();
+        setSectionPlaybackTimeline({});
+        setUploadProcessingBySection({});
+        setUploadCountsBySection({});
+        setPlaylistSyncAt(0);
+        setContentResetVersion((prev) => prev + 1);
+      } catch {
+      } finally {
+        if (mounted) {
+          setStartupActionReady(true);
+        }
+      }
+    };
+
+    runPendingStartupAction();
+    return () => {
+      mounted = false;
+    };
+  }, [bootReady]);
+
+  useEffect(() => {
     const ErrorUtils = (globalThis as any)?.ErrorUtils;
     if (!ErrorUtils?.setGlobalHandler) return;
 
@@ -603,7 +641,7 @@ export default function App() {
   }, [bootReady, pulseValue, spinValue]);
 
   useEffect(() => {
-    if (!bootReady) return;
+    if (!bootReady || !startupActionReady) return;
     let mounted = true;
     const initLicense = async () => {
       try {
@@ -657,7 +695,7 @@ export default function App() {
     return () => {
       mounted = false;
     };
-  }, [bootReady]);
+  }, [bootReady, startupActionReady]);
 
   useEffect(() => {
     if (!bootReady) return;
@@ -702,7 +740,7 @@ export default function App() {
     return () => {
       mounted = false;
     };
-  }, [bootReady]);
+  }, [bootReady, startupActionReady]);
 
   const focusLicenseInput = () => {
     setLicenseFocusTarget("input");

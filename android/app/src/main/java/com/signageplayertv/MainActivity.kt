@@ -16,7 +16,6 @@ import android.os.Handler
 import android.os.Looper
 import android.view.KeyEvent
 import android.widget.Toast
-import java.io.File
 
 class MainActivity : ReactActivity() {
 
@@ -26,6 +25,7 @@ class MainActivity : ReactActivity() {
     private const val PREFS_NAME = "kiosk_prefs"
     private const val KEY_AUTO_REOPEN_ENABLED = "auto_reopen_enabled"
     private const val KEY_AUTO_REOPEN_LOCKED_OFF = "auto_reopen_locked_off"
+    private const val KEY_PENDING_STARTUP_ACTION = "pending_startup_action"
     private const val EXTRA_SKIP_AUTO_REOPEN_RESTORE_ONCE = "skip_auto_reopen_restore_once"
   }
 
@@ -249,13 +249,10 @@ override fun onWindowFocusChanged(hasFocus: Boolean) {
   private fun clearSignageDataAndRestart() {
     try {
       setAutoReopenEnabled(false, true)
+      getPrefs().edit()
+        .putString(KEY_PENDING_STARTUP_ACTION, "clear-data-keep-identity")
+        .apply()
       cancelScheduledReopen()
-
-      // Remove app-level signage files without full "clear data" settings flow.
-      val filesRoot = filesDir
-      File(filesRoot, "media").deleteRecursively()
-      File(filesRoot, "config.json").delete()
-      cacheDir.deleteRecursively()
     } catch (_: Exception) {
       // Continue to restart even if partial cleanup fails.
     }
