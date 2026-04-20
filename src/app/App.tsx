@@ -53,6 +53,7 @@ const NETWORK_QUALITY_SLOW_MS = 1800;
 const NETWORK_QUALITY_VERY_SLOW_MS = 3500;
 const SELF_HEAL_SYNC_INTERVAL_MS = 120000;
 const RECONNECT_RETRY_INTERVAL_MS = 2000;
+const DISCOVERY_RETRY_INTERVAL_MS = 5000;
 const ENABLE_AUTO_WIFI_RECOVERY = false;
 const ENABLE_NETWORK_RECOVERY_LOOP = false;
 const OFFLINE_NOTICE_POLL_MS = 3000;
@@ -796,6 +797,7 @@ export default function App() {
     let selfHealTimer: ReturnType<typeof setInterval> | null = null;
     let cacheGuardTimer: ReturnType<typeof setInterval> | null = null;
     let reconnectTimer: ReturnType<typeof setInterval> | null = null;
+    let discoveryTimer: ReturnType<typeof setInterval> | null = null;
     let offlineNoticeTimer: ReturnType<typeof setInterval> | null = null;
     let deferredStartTimer: ReturnType<typeof setTimeout> | null = null;
     let initRetryTimer: ReturnType<typeof setTimeout> | null = null;
@@ -1090,6 +1092,32 @@ export default function App() {
       reconnectTimer = null;
     };
 
+    const startDiscoveryLoop = () => {
+      if (discoveryTimer) return;
+      discoveryTimer = setInterval(async () => {
+        if (!isMounted || initInProgress || socket?.connected) return;
+        try {
+          const discoveredUrl = await refreshCMSDiscovery();
+          if (!discoveredUrl) {
+            setConnectTexts(
+              "Searching local network for CMS server in background",
+              "Background scan"
+            );
+            return;
+          }
+          await setServer(discoveredUrl, { forceNotify: true });
+          setConnectTexts(`CMS found at ${discoveredUrl}. Connecting`, "CMS discovered");
+        } catch {
+        }
+      }, DISCOVERY_RETRY_INTERVAL_MS);
+    };
+
+    const stopDiscoveryLoop = () => {
+      if (!discoveryTimer) return;
+      clearInterval(discoveryTimer);
+      discoveryTimer = null;
+    };
+
     const handleServerChange = async (nextUrl: string) => {
       const normalized = String(nextUrl || "").trim();
       if (!normalized || !isMounted) return;
@@ -1277,11 +1305,14 @@ export default function App() {
         }
         if (ENABLE_NETWORK_RECOVERY_LOOP) checkAndRecoverNetwork();
         if (restoredServer) {
-          setConnectTexts(`Reconnecting to saved CMS at ${restoredServer}`, "Reconnecting");
+          setConnectTexts(`Checking saved CMS at ${restoredServer}`, "Reconnecting");
         } else {
           setConnectTexts("Scanning local network for CMS server", "Network scan running");
         }
-        const url = restoredServer || (await findCMS());
+        const knownUrl = restoredServer ? await findKnownCMS() : "";
+        const url =
+          knownUrl ||
+          (restoredServer ? await refreshCMSDiscovery() : await findCMS());
         if (!url) {
           pushDiagnosticEvent("cms", "CMS not found. Using cached playback");
           console.log("No CMS found – using cached content if available");
@@ -1296,7 +1327,10 @@ export default function App() {
               );
               setReady(true);
             } else {
-              setConnectTexts("CMS not found. Showing empty player", "Offline");
+              setConnectTexts(
+                "CMS not found yet. Showing empty player while background search continues",
+                "Background scan"
+              );
               setReady(true);
             }
           }
@@ -1659,6 +1693,7 @@ export default function App() {
     startWatchdog();
     startNetworkRecoveryLoop();
     startReconnectLoop();
+    startDiscoveryLoop();
     startOfflineNoticeLoop();
     const unsubscribeServerChanges = subscribeToServerChanges((url) => {
       handleServerChange(url).catch(() => {
@@ -1680,6 +1715,7 @@ export default function App() {
       stopSelfHealSyncLoop();
       stopCacheGuardLoop();
       stopReconnectLoop();
+      stopDiscoveryLoop();
       stopOfflineNoticeLoop();
       unsubscribeServerChanges();
       if (deferredStartTimer) {
