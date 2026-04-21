@@ -22,6 +22,7 @@ const basePath = process.pkg
   : path.join(__dirname, "..");
 
 const uploadsBase = path.join(basePath, "uploads");
+const incomingUploadsBase = path.join(uploadsBase, "__incoming");
 const ALLOWED_EXTENSIONS = new Set([
   ".mp4",
   ".mov",
@@ -353,16 +354,15 @@ function resolveActiveSectionDir(deviceId, sectionNumber) {
   return "";
 }
 
-function cleanupStaleIncomingDirs(deviceId, section, maxAgeMs = 6 * 60 * 60 * 1000) {
-  const deviceDir = path.join(uploadsBase, deviceId);
-  if (!safeExistsDir(deviceDir)) return;
+function cleanupStaleIncomingDirs(baseDir, section, maxAgeMs = 6 * 60 * 60 * 1000) {
+  if (!safeExistsDir(baseDir)) return;
   const prefix = `section${section}__incoming`;
   const now = Date.now();
-  const entries = safeReaddir(deviceDir);
+  const entries = safeReaddir(baseDir);
 
   for (const entry of entries) {
     if (!String(entry).startsWith(prefix)) continue;
-    const full = path.join(deviceDir, entry);
+    const full = path.join(baseDir, entry);
     const stat = safeStat(full);
     if (!stat || !stat.isDirectory()) continue;
     const ageMs = now - Number(stat.mtimeMs || 0);
@@ -734,13 +734,13 @@ router.post("/:deviceId/section/:section", (req, res) => {
 
   const uploadToken = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
   const tempSectionPath = path.join(
-    uploadsBase,
+    incomingUploadsBase,
     tempTargetId,
     `section${section}__incoming_${uploadToken}`
   );
 
   try {
-    cleanupStaleIncomingDirs(tempTargetId, section);
+    cleanupStaleIncomingDirs(path.join(incomingUploadsBase, tempTargetId), section);
     ensureDir(tempSectionPath);
 
     const storage = multer.diskStorage({
