@@ -114,6 +114,7 @@ server/installer/build-meta.json
 server/public/uploads/
 server/data/*.local.json
 server/data/device-status.json
+server/data/device-profiles.json
 server/data/playback-timeline.json
 
 # Android build folders
@@ -124,6 +125,7 @@ android/.cxx/
 # VS Code
 .vscode/
 server/data/configs/
+!server/data/configs/default.json
 server/data/device-groups.json
 .gradle-local/
 android/.gradle-local/
@@ -133,3 +135,8 @@ android/.gradle-local/
 _tmp_*/
 .android-local/
 .bundle/
+
+# Template system source must stay tracked
+!server/public/template-system.js
+!src/templates/
+!src/templates/**

@@ -41,6 +41,49 @@ function cloneDefaultConfig() {
   return JSON.parse(JSON.stringify(DEFAULT_CONFIG_TEMPLATE));
 }
 
+function normalizeSection(section) {
+  const sourceType = ["multimedia", "web", "youtube", "template"].includes(
+    String(section?.sourceType || "")
+  )
+    ? String(section?.sourceType || "")
+    : "multimedia";
+  const inputSourceType = ["multimedia", "web", "youtube", "template"].includes(
+    String(section?.inputSourceType || "")
+  )
+    ? String(section?.inputSourceType || "")
+    : sourceType;
+  const templatePlaylist = Array.isArray(section?.templatePlaylist)
+    ? section.templatePlaylist.filter((item) => item && typeof item === "object")
+    : [];
+  const templateConfig =
+    section?.templateConfig && typeof section.templateConfig === "object"
+      ? section.templateConfig
+      : templatePlaylist[0] || null;
+
+  return {
+    slideDirection: String(section?.slideDirection || "left"),
+    slideDuration: Math.max(1, Number(section?.slideDuration || 5)),
+    sourceType,
+    sourceUrl: String(section?.sourceUrl || ""),
+    inputSourceType,
+    inputSourceUrl: String(section?.inputSourceUrl || section?.sourceUrl || ""),
+    templateConfig,
+    templatePlaylist,
+  };
+}
+
+function normalizeConfig(config) {
+  const incoming = config && typeof config === "object" ? config : {};
+  const sections = Array.isArray(incoming.sections) ? incoming.sections : [];
+  return {
+    ...cloneDefaultConfig(),
+    ...incoming,
+    sections: [0, 1, 2].map((index) =>
+      normalizeSection(sections[index] || DEFAULT_CONFIG_TEMPLATE.sections[index] || {})
+    ),
+  };
+}
+
 function ensureDir(dirPath) {
   if (!fs.existsSync(dirPath)) {
     fs.mkdirSync(dirPath, { recursive: true });
@@ -255,6 +298,7 @@ const DEFAULT_CONFIG_TEMPLATE = {
     bgColor: "#000000",
     speed: 6,
     fontSize: 24,
+    fontFamily: "sans-serif",
     position: "bottom",
   },
   schedule: {
@@ -371,7 +415,7 @@ router.get("/", (req, res) => {
 
   const data = fs.readFileSync(filePath, "utf-8");
   res.json({
-    ...JSON.parse(data),
+    ...normalizeConfig(JSON.parse(data)),
     playbackTimeline: getPlaybackTimeline(
       target.type === "device" ? target.value : "all"
     ),
@@ -381,6 +425,7 @@ router.get("/", (req, res) => {
 router.post("/", (req, res) => {
   const { targetDevice, config } = req.body;
   const target = parseTargetValue(targetDevice);
+  const normalizedConfig = normalizeConfig(config);
   if (target.type === "invalid") {
     return res.status(400).json({ success: false, error: "invalid-device-id" });
   }
@@ -392,16 +437,16 @@ router.post("/", (req, res) => {
 
   if (target.type === "all") {
     const defaultPath = DEFAULT_CONFIG_PATH;
-    fs.writeFileSync(defaultPath, JSON.stringify(config, null, 2));
+    fs.writeFileSync(defaultPath, JSON.stringify(normalizedConfig, null, 2));
 
     const files = fs.readdirSync(CONFIG_DIR);
     files.forEach((file) => {
       if (file !== "default.json" && file.endsWith(".json")) {
         const devicePath = path.join(CONFIG_DIR, file);
-        fs.writeFileSync(devicePath, JSON.stringify(config, null, 2));
+        fs.writeFileSync(devicePath, JSON.stringify(normalizedConfig, null, 2));
       }
     });
-    cleanupInactiveSectionsForTarget(target, config);
+    cleanupInactiveSectionsForTarget(target, normalizedConfig);
 
     if (global.io) {
       global.io.emit("config-updated");
@@ -409,9 +454,9 @@ router.post("/", (req, res) => {
   } else {
     scopedDeviceIds.forEach((deviceId) => {
       const devicePath = path.join(CONFIG_DIR, `${deviceId}.json`);
-      fs.writeFileSync(devicePath, JSON.stringify(config, null, 2));
+      fs.writeFileSync(devicePath, JSON.stringify(normalizedConfig, null, 2));
     });
-    cleanupInactiveSectionsForTarget(target, config);
+    cleanupInactiveSectionsForTarget(target, normalizedConfig);
     emitToTarget(targetDevice, "config-updated");
   }
 

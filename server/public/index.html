@@ -185,6 +185,14 @@
                 <input type="range" id="tickerFontSize" min="12" max="60" />
                 <label>Ticker Speed</label>
                 <input type="range" id="tickerSpeed" min="0" max="12" value="6" />
+                <label>Ticker Font Family</label>
+                <select id="tickerFontFamily">
+                  <option value="sans-serif">Sans Serif</option>
+                  <option value="serif">Serif</option>
+                  <option value="monospace">Monospace</option>
+                  <option value="cursive">Cursive</option>
+                  <option value="sans-serif-condensed">Condensed</option>
+                </select>
               </div>
             </div>
           </div>
@@ -328,6 +336,7 @@
     <div id="noticeStack" class="notice-stack" aria-live="polite"></div>
   </div>
 
+  <script src="template-system.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

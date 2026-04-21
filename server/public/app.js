@@ -25,6 +25,7 @@ const SECTION_SOURCE_TYPES = {
   multimedia: "multimedia",
   web: "web",
   youtube: "youtube",
+  template: "template",
 };
 
 let selectedGrid3Layout = "stack-v";
@@ -1229,6 +1230,11 @@ function renderSectionSlot(slot, sectionNumber, config) {
   const sectionConfig = config?.sections?.[sectionNumber - 1] || {};
   const sourceType = sectionConfig.sourceType || SECTION_SOURCE_TYPES.multimedia;
   const sourceUrl = normalizeSectionSourceUrl(sourceType, sectionConfig.sourceUrl);
+  const templatePlaylist = Array.isArray(sectionConfig.templatePlaylist) && sectionConfig.templatePlaylist.length
+    ? sectionConfig.templatePlaylist
+    : sectionConfig.templateConfig
+    ? [sectionConfig.templateConfig]
+    : [];
 
   const files = previewMediaBySection[sectionNumber] || [];
   const state = previewSectionState[sectionNumber];
@@ -1253,6 +1259,28 @@ function renderSectionSlot(slot, sectionNumber, config) {
   tag.className = "slot-tag";
   tag.textContent = `Section ${sectionNumber}`;
   slot.appendChild(tag);
+
+  if (sourceType === SECTION_SOURCE_TYPES.template) {
+    if (!templatePlaylist.length) {
+      applyPreviewLiveOverlay(slot, selectedStatus, sectionNumber, fallbackCacheStatus);
+      return;
+    }
+    const templateItem = templatePlaylist[state.index % templatePlaylist.length];
+    const rendered = window.TemplateSystem?.renderPreviewInto(slot, sectionConfig, templateItem);
+    if (!liveMode && templatePlaylist.length > 1) {
+      const durationMs = getSectionDurationMs(config, sectionNumber);
+      state.timer = setTimeout(() => {
+        state.index = (state.index + 1) % templatePlaylist.length;
+        renderSectionSlot(slot, sectionNumber, config);
+      }, durationMs);
+    }
+    if (!rendered) {
+      applyPreviewLiveOverlay(slot, selectedStatus, sectionNumber, fallbackCacheStatus);
+      return;
+    }
+    applyPreviewLiveOverlay(slot, selectedStatus, sectionNumber, fallbackCacheStatus);
+    return;
+  }
 
   if (sourceType === SECTION_SOURCE_TYPES.web || sourceType === SECTION_SOURCE_TYPES.youtube) {
     if (!sourceUrl) {
@@ -1473,6 +1501,7 @@ function applyPreviewTicker(preview, ticker = {}) {
   if (!text) return;
 
   const fontSize = Number(ticker?.fontSize || 24);
+  const fontFamily = String(ticker?.fontFamily || "sans-serif");
   const padY = 6;
   const tickerHeight = Math.max(22, Math.round(fontSize + padY * 2));
   const position = String(ticker?.position || "bottom");
@@ -1489,6 +1518,7 @@ function applyPreviewTicker(preview, ticker = {}) {
   span.className = "preview-ticker-text";
   span.textContent = text;
   span.style.color = String(ticker?.color || "#fff");
+  span.style.fontFamily = fontFamily;
   span.style.fontSize = `${fontSize}px`;
 
   track.appendChild(span);
@@ -1527,6 +1557,9 @@ function applyPreviewTicker(preview, ticker = {}) {
 
 function buildConfigFromForm() {
   const section1Duration = Number(document.getElementById("duration1").value || 5);
+  const section1Template = window.TemplateSystem?.getSectionConfig(1) || {};
+  const section2Template = window.TemplateSystem?.getSectionConfig(2) || {};
+  const section3Template = window.TemplateSystem?.getSectionConfig(3) || {};
   return {
     orientation: document.getElementById("orientation").value,
     layout: document.getElementById("layout").value,
@@ -1542,18 +1575,24 @@ function buildConfigFromForm() {
         slideDuration: Number(document.getElementById("duration1").value || 5),
         sourceType: document.getElementById("sourceType1")?.value || SECTION_SOURCE_TYPES.multimedia,
         sourceUrl: document.getElementById("sourceUrl1")?.value || "",
+        templateConfig: section1Template.templateConfig || null,
+        templatePlaylist: section1Template.templatePlaylist || [],
       },
       {
         slideDirection: document.getElementById("dir2").value,
         slideDuration: Number(document.getElementById("duration2").value || 5),
         sourceType: document.getElementById("sourceType2")?.value || SECTION_SOURCE_TYPES.multimedia,
         sourceUrl: document.getElementById("sourceUrl2")?.value || "",
+        templateConfig: section2Template.templateConfig || null,
+        templatePlaylist: section2Template.templatePlaylist || [],
       },
       {
         slideDirection: document.getElementById("dir3").value,
         slideDuration: Number(document.getElementById("duration3").value || 5),
         sourceType: document.getElementById("sourceType3")?.value || SECTION_SOURCE_TYPES.multimedia,
         sourceUrl: document.getElementById("sourceUrl3")?.value || "",
+        templateConfig: section3Template.templateConfig || null,
+        templatePlaylist: section3Template.templatePlaylist || [],
       },
     ],
     ticker: {
@@ -1562,6 +1601,7 @@ function buildConfigFromForm() {
       bgColor: document.getElementById("tickerBgColor").value,
       speed: Number(document.getElementById("tickerSpeed").value || 6),
       fontSize: Number(document.getElementById("tickerFontSize").value || 24),
+      fontFamily: document.getElementById("tickerFontFamily").value || "sans-serif",
       position: document.getElementById("tickerPosition").value,
     },
     cache: {
@@ -1627,6 +1667,12 @@ function buildConfigForSubmit(config) {
         ...section,
         inputSourceType: sourceType,
         inputSourceUrl: sourceUrl,
+        templateConfig:
+          sourceType === SECTION_SOURCE_TYPES.template ? section?.templateConfig || null : null,
+        templatePlaylist:
+          sourceType === SECTION_SOURCE_TYPES.template && Array.isArray(section?.templatePlaylist)
+            ? section.templatePlaylist
+            : [],
       };
     }),
   };
@@ -1704,6 +1750,8 @@ async function downloadYoutubeSections(config, targetDevice) {
     );
   }
 }
+
+window.showNotice = showNotice;
 
 function updateSectionVisibility() {
   const layout = document.getElementById("layout").value;
@@ -2014,17 +2062,36 @@ function onSectionSourceUrlInput() {
   renderScreenPreview();
 }
 
+function openTemplatePicker(section) {
+  if (!window.TemplateSystem || typeof window.TemplateSystem.openPicker !== "function") {
+    showNotice(
+      "error",
+      "Template System Missing",
+      "Template library script did not load. Refresh CMS page once and try again."
+    );
+    return;
+  }
+  window.TemplateSystem.openPicker(section);
+}
+
 function updateSectionUploadMode(section) {
   const typeEl = document.getElementById(`sourceType${section}`);
   const uploadWrap = document.getElementById(`uploadWrap${section}`);
   const sourceWrap = document.getElementById(`sourceUrlWrap${section}`);
   const sourceInput = document.getElementById(`sourceUrl${section}`);
   const youtubeOptionsWrap = document.getElementById(`youtubeOptionsWrap${section}`);
+  const templateWrap = document.getElementById(`templateWrap${section}`);
   if (!typeEl) return;
 
   const sourceType = typeEl.value || SECTION_SOURCE_TYPES.multimedia;
   if (uploadWrap) uploadWrap.classList.toggle("hidden", sourceType !== SECTION_SOURCE_TYPES.multimedia);
-  if (sourceWrap) sourceWrap.classList.toggle("hidden", sourceType === SECTION_SOURCE_TYPES.multimedia);
+  if (sourceWrap) {
+    sourceWrap.classList.toggle(
+      "hidden",
+      sourceType === SECTION_SOURCE_TYPES.multimedia || sourceType === SECTION_SOURCE_TYPES.template
+    );
+  }
+  if (templateWrap) templateWrap.classList.toggle("hidden", sourceType !== SECTION_SOURCE_TYPES.template);
   if (youtubeOptionsWrap) {
     youtubeOptionsWrap.classList.toggle("hidden", sourceType !== SECTION_SOURCE_TYPES.youtube);
   }
@@ -2034,6 +2101,8 @@ function updateSectionUploadMode(section) {
       sourceInput.placeholder = "https://youtube.com/watch?v=...";
     } else if (sourceType === SECTION_SOURCE_TYPES.web) {
       sourceInput.placeholder = "https://example.com";
+    } else if (sourceType === SECTION_SOURCE_TYPES.template) {
+      sourceInput.placeholder = "";
     } else {
       sourceInput.placeholder = "";
     }
@@ -2058,6 +2127,7 @@ function renderUploadSections() {
             <option value="multimedia">Multimedia (Image/Video)</option>
             <option value="web">Website URL</option>
             <option value="youtube">YouTube URL</option>
+            <option value="template">Template</option>
           </select>
         </div>
         <div id="sourceUrlWrap${i}" class="hidden">
@@ -2072,6 +2142,14 @@ function renderUploadSections() {
             <input type="checkbox" id="youtubeRedownload${i}" />
             <span>Re-download this YouTube video on save</span>
           </label>
+        </div>
+        <div id="templateWrap${i}" class="template-source-wrap hidden">
+          <div class="template-source-header">
+            <div class="template-source-actions">
+              <button class="btn primary template-open-btn" type="button" onclick="openTemplatePicker(${i})">Pick Template</button>
+            </div>
+          </div>
+          <div id="templateSummary${i}" class="template-summary-box"></div>
         </div>
         <div id="uploadWrap${i}" class="upload-row">
           <input
@@ -2089,6 +2167,21 @@ function renderUploadSections() {
   container.innerHTML = `<div class="section-controls-row upload-sections-row">${panels.join("")}</div>`;
 
   for (let i = 1; i <= count; i++) {
+    const sectionConfig = currentConfig?.sections?.[i - 1] || {};
+    const typeEl = document.getElementById(`sourceType${i}`);
+    const urlEl = document.getElementById(`sourceUrl${i}`);
+    if (typeEl) {
+      typeEl.value =
+        sectionConfig.inputSourceType ||
+        sectionConfig.sourceType ||
+        SECTION_SOURCE_TYPES.multimedia;
+    }
+    if (urlEl) {
+      urlEl.value = sectionConfig.inputSourceUrl || sectionConfig.sourceUrl || "";
+    }
+    if (window.TemplateSystem) {
+      window.TemplateSystem.hydrateSection(i, sectionConfig, { silent: true });
+    }
     updateSectionUploadMode(i);
   }
 }
@@ -2328,7 +2421,7 @@ async function uploadMedia(section) {
   const targetValue = getSelectedTargetValue();
   const sourceType = document.getElementById(`sourceType${section}`)?.value || SECTION_SOURCE_TYPES.multimedia;
   if (sourceType !== SECTION_SOURCE_TYPES.multimedia) {
-    showNotice("info", "Upload Not Required", "For Website/YouTube source, upload is not required. Save settings only.");
+    showNotice("info", "Upload Not Required", "For Website, YouTube, or Template source, upload is not required. Save settings only.");
     return;
   }
 
@@ -2483,12 +2576,13 @@ async function loadConfig() {
   document.getElementById("duration3").value = config.sections?.[2]?.slideDuration || 19;
 
   document.getElementById("tickerText").value =
-    config.ticker?.text || "Breaking News: NextView Premium Product New Update Available!";
+    config.ticker?.text || "";
   document.getElementById("tickerFontSize").value = config.ticker?.fontSize || 24;
   document.getElementById("tickerPosition").value = config.ticker?.position || "bottom";
   document.getElementById("tickerColor").value = config.ticker?.color || "#ffffff";
   document.getElementById("tickerBgColor").value = config.ticker?.bgColor || "#000000";
   document.getElementById("tickerSpeed").value = config.ticker?.speed ?? 6;
+  document.getElementById("tickerFontFamily").value = config.ticker?.fontFamily || "sans-serif";
   document.getElementById("videoCacheMB").value = config.cache?.videoMB || 2048;
   setScheduleToForm(config.schedule);
 
@@ -2515,6 +2609,9 @@ async function loadConfig() {
     }
     if (urlEl) {
       urlEl.value = sectionConfig.inputSourceUrl || sectionConfig.sourceUrl || "";
+    }
+    if (window.TemplateSystem) {
+      window.TemplateSystem.hydrateSection(i, sectionConfig, { silent: true });
     }
     const redownloadEl = document.getElementById(`youtubeRedownload${i}`);
     if (redownloadEl) {
@@ -2759,6 +2856,12 @@ window.renderGroupEditor = renderGroupEditor;
 window.renameDeviceLabel = renameDeviceLabel;
 
 document.addEventListener("DOMContentLoaded", async () => {
+  window.TemplateSystem?.init({
+    onChange: () => {
+      currentConfig = buildConfigFromForm();
+      renderScreenPreview();
+    },
+  });
   renderGrid3LayoutOptions();
   updateScheduleFallbackVisibility();
   updateUploadProgress(0, "Preparing upload...");
@@ -2811,6 +2914,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     "tickerColor",
     "tickerBgColor",
     "tickerSpeed",
+    "tickerFontFamily",
     "scheduleStart",
     "scheduleEnd",
     "scheduleFallbackMessage",

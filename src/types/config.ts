@@ -1,6 +1,12 @@
 export interface SectionConfig {
-  slideDirection: 'left' | 'right' | 'top' | 'bottom';
-  slideDuration: number; // 🔥 add this
+  slideDirection: "left" | "right" | "top" | "bottom";
+  slideDuration: number;
+  sourceType?: "multimedia" | "web" | "youtube" | "template";
+  sourceUrl?: string;
+  inputSourceType?: "multimedia" | "web" | "youtube" | "template";
+  inputSourceUrl?: string;
+  templateConfig?: any;
+  templatePlaylist?: any[];
 }
 
 export interface TickerConfig {
@@ -9,7 +15,8 @@ export interface TickerConfig {
   bgColor: string;
   speed: number;
   fontSize: number;
-  position: 'top' | 'bottom';
+  fontFamily?: string;
+  position: "top" | "bottom";
 }
 
 export interface CacheConfig {
@@ -17,16 +24,15 @@ export interface CacheConfig {
 }
 
 export interface AppConfig {
-  layout: 'fullscreen' | 'grid2' | 'grid3';
+  layout: "fullscreen" | "grid2" | "grid3";
   orientation:
-  | 'horizontal'
-  | 'vertical'
-  | 'reverse-horizontal'
-  | 'reverse-vertical';
+    | "horizontal"
+    | "vertical"
+    | "reverse-horizontal"
+    | "reverse-vertical";
   slideDuration: number;
-  animation: 'slide';
+  animation: "slide";
   bgColor: string;
-
   sections: SectionConfig[];
   ticker: TickerConfig;
   cache?: CacheConfig;

@@ -53,6 +53,7 @@ export default function Ticker({ ticker }: any) {
           position: "absolute",
           opacity: 0,
           fontSize: ticker.fontSize || 24,
+          fontFamily: ticker.fontFamily || "sans-serif",
           fontWeight: "800",
           letterSpacing: 0.6,
         }}
@@ -74,6 +75,7 @@ export default function Ticker({ ticker }: any) {
           transform: [{ translateX }],
           color: ticker.color || "#fff",
           fontSize: ticker.fontSize || 24,
+          fontFamily: ticker.fontFamily || "sans-serif",
           textShadowColor: "rgba(0, 0, 0, 0.85)",
           textShadowOffset: { width: 3, height: 3 },
           textShadowRadius: 6,

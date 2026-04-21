@@ -3,27 +3,27 @@
     "sections": {
       "1": {
         "section": 1,
-        "cycleId": "1-1776688995429_a3y2s0",
-        "syncAt": 1776688998910,
-        "updatedAt": 1776688995797,
-        "fileCount": 3,
-        "mediaSignature": "MEGGI___TEA__COLD_DRINKS.png|MISAL_PAV___TEA_COLD_DRINKS.png|MIX_VEG._PAKODA___TEA__COLD_DRINKS.png",
+        "cycleId": "1-1776767770285_11n6wc",
+        "syncAt": 1776767773578,
+        "updatedAt": 1776767770572,
+        "fileCount": 1,
+        "mediaSignature": "0cfebe17-50ca-4261-903f-ac4b9164f97f.jpg",
         "targetDevice": "all"
       },
       "2": {
         "section": 2,
-        "cycleId": "2-cleared-1776689044542",
-        "syncAt": 1776689044543,
-        "updatedAt": 1776689044542,
+        "cycleId": "2-cleared-1776768242696",
+        "syncAt": 1776768242696,
+        "updatedAt": 1776768242696,
         "fileCount": 0,
         "mediaSignature": "",
         "targetDevice": "all"
       },
       "3": {
         "section": 3,
-        "cycleId": "3-cleared-1776689044543",
-        "syncAt": 1776689044543,
-        "updatedAt": 1776689044543,
+        "cycleId": "3-cleared-1776768242697",
+        "syncAt": 1776768242698,
+        "updatedAt": 1776768242697,
         "fileCount": 0,
         "mediaSignature": "",
         "targetDevice": "all"
@@ -31,25 +31,91 @@
     }
   },
   "devices": {
+    "4aa1624c74676d0b": {
+      "sections": {
+        "2": {
+          "section": 2,
+          "cycleId": "2-cleared-1776768242702",
+          "syncAt": 1776768242702,
+          "updatedAt": 1776768242702,
+          "fileCount": 0,
+          "mediaSignature": "",
+          "targetDevice": "4aa1624c74676d0b"
+        },
+        "3": {
+          "section": 3,
+          "cycleId": "3-cleared-1776768242703",
+          "syncAt": 1776768242703,
+          "updatedAt": 1776768242703,
+          "fileCount": 0,
+          "mediaSignature": "",
+          "targetDevice": "4aa1624c74676d0b"
+        }
+      }
+    },
+    "aa57fb14dd658b75": {
+      "sections": {
+        "2": {
+          "section": 2,
+          "cycleId": "2-cleared-1776768242710",
+          "syncAt": 1776768242711,
+          "updatedAt": 1776768242710,
+          "fileCount": 0,
+          "mediaSignature": "",
+          "targetDevice": "aa57fb14dd658b75"
+        },
+        "3": {
+          "section": 3,
+          "cycleId": "3-cleared-1776768242714",
+          "syncAt": 1776768242715,
+          "updatedAt": 1776768242714,
+          "fileCount": 0,
+          "mediaSignature": "",
+          "targetDevice": "aa57fb14dd658b75"
+        }
+      }
+    },
     "group_office": {
       "sections": {
         "2": {
           "section": 2,
-          "cycleId": "2-cleared-1776689044545",
-          "syncAt": 1776689044545,
-          "updatedAt": 1776689044545,
+          "cycleId": "2-cleared-1776768242716",
+          "syncAt": 1776768242717,
+          "updatedAt": 1776768242716,
           "fileCount": 0,
           "mediaSignature": "",
           "targetDevice": "group_office"
         },
         "3": {
           "section": 3,
-          "cycleId": "3-cleared-1776689044546",
-          "syncAt": 1776689044546,
-          "updatedAt": 1776689044546,
+          "cycleId": "3-cleared-1776768242717",
+          "syncAt": 1776768242719,
+          "updatedAt": 1776768242717,
           "fileCount": 0,
           "mediaSignature": "",
           "targetDevice": "group_office"
+        }
+      }
+    },
+    "868e5a4be1b038ea": {
+      "sections": {
+        "2": {
+          "section": 2,
+          "cycleId": "2-cleared-1776768242704",
+          "syncAt": 1776768242705,
+          "updatedAt": 1776768242704,
+          "fileCount": 0,
+          "mediaSignature": "",
+          "targetDevice": "868e5a4be1b038ea"
+        },
+        "3": {
+          "section": 3,
+          "cycleId": "3-cleared-1776768242707",
+          "syncAt": 1776768242708,
+          "updatedAt": 1776768242707,
+          "fileCount": 0,
+          "mediaSignature": "",
+          "targetDevice": "868e5a4be1b038ea"
         }
       }
     }

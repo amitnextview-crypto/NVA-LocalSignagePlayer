@@ -15,11 +15,13 @@ import {
 import { getServer } from "../services/serverService";
 import { buildPlaybackResumeKey, getPlaylistAdvanceState } from "./videoPlaybackState";
 import NativeVideoPlayer from "./NativeVideoPlayer";
+import TemplateRenderer from "../templates/TemplateRenderer";
 
 const SOURCE_TYPES = {
   multimedia: "multimedia",
   web: "web",
   youtube: "youtube",
+  template: "template",
 };
 const VIDEO_FILE_RE = /\.(mp4|m4v|mov|mkv|webm)(\?.*)?$/i;
 const LARGE_VIDEO_STREAM_THRESHOLD_BYTES = 300 * 1024 * 1024;
@@ -234,6 +236,7 @@ export default function SlideRenderer({
   const [pdfReloadToken, setPdfReloadToken] = useState(0);
   const [cacheProgress, setCacheProgress] = useState(0);
   const [cacheProgressByPath, setCacheProgressByPath] = useState<Record<string, number>>({});
+  const [templateIndex, setTemplateIndex] = useState(0);
   const [imageSlotUrls, setImageSlotUrls] = useState<{ a: string; b: string }>({ a: "", b: "" });
   const [imageSlotLoaded, setImageSlotLoaded] = useState<{ a: boolean; b: boolean }>({
     a: false,
@@ -256,6 +259,7 @@ export default function SlideRenderer({
   const backdropTranslateY = useRef(new Animated.Value(0)).current;
   const scale = useRef(new Animated.Value(0.95)).current;
   const opacity = useRef(new Animated.Value(1)).current;
+  const templateOpacity = useRef(new Animated.Value(1)).current;
   const rotateY = useRef(new Animated.Value(0)).current;
   const livePulse = useRef(new Animated.Value(1)).current;
   const videoFade = useRef(new Animated.Value(1)).current;
@@ -311,6 +315,7 @@ export default function SlideRenderer({
   const MAX_PDF_RETRY = 3;
   const durationStoreKey = `playback:durations:section:${sectionIndex}`;
   const lastSectionStateKey = `playback:last:section:${sectionIndex}`;
+  const templateChangedAtRef = useRef(Date.now());
 
   const getPlaybackResumeKey = (item: any) =>
     buildPlaybackResumeKey(sectionIndex, getMediaContentIdentity(item));
@@ -451,6 +456,12 @@ export default function SlideRenderer({
   const sourceType = sectionConfig?.sourceType || SOURCE_TYPES.multimedia;
   const inputSourceType = sectionConfig?.inputSourceType || sourceType;
   const sourceUrl = sectionConfig?.sourceUrl || "";
+  const templatePlaylist =
+    Array.isArray(sectionConfig?.templatePlaylist) && sectionConfig.templatePlaylist.length
+      ? sectionConfig.templatePlaylist
+      : sectionConfig?.templateConfig
+      ? [sectionConfig.templateConfig]
+      : [];
   const isYoutubeDerivedMultimedia =
     sourceType === SOURCE_TYPES.multimedia && inputSourceType === SOURCE_TYPES.youtube;
   const isMultiPaneLayout = config?.layout === "grid2" || config?.layout === "grid3";
@@ -498,6 +509,49 @@ export default function SlideRenderer({
       }
     }
   }, [files, index]);
+
+  useEffect(() => {
+    if (sourceType !== SOURCE_TYPES.template) {
+      setTemplateIndex(0);
+      return;
+    }
+    if (!templatePlaylist.length) {
+      setTemplateIndex(0);
+      return;
+    }
+    if (templateIndex >= templatePlaylist.length) {
+      setTemplateIndex(0);
+      return;
+    }
+    templateChangedAtRef.current = Date.now();
+    templateOpacity.setValue(0.25);
+    Animated.timing(templateOpacity, {
+      toValue: 1,
+      duration: 260,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    }).start();
+    const durationMs = Math.max(
+      1000,
+      Math.round(
+        (config?.sections?.[sectionIndex]?.slideDuration || config?.slideDuration || 5) * 1000
+      )
+    );
+    if (templatePlaylist.length <= 1) return;
+    const timer = setTimeout(() => {
+      if (!isMountedRef.current) return;
+      setTemplateIndex((prev) => (prev + 1) % templatePlaylist.length);
+    }, durationMs);
+    return () => clearTimeout(timer);
+  }, [
+    sourceType,
+    templateIndex,
+    templatePlaylist,
+    config?.sections,
+    config?.slideDuration,
+    sectionIndex,
+    templateOpacity,
+  ]);
 
   useEffect(() => {
     if (!files.length) return;
@@ -774,6 +828,8 @@ export default function SlideRenderer({
         setUri(normalizeWebUrl(sourceUrl));
       } else if (sourceType === SOURCE_TYPES.youtube) {
         setUri(normalizeYoutubeEmbedUrl(sourceUrl));
+      } else if (sourceType === SOURCE_TYPES.template) {
+        setUri("template://local");
       } else {
         setUri("");
       }
@@ -1676,6 +1732,10 @@ export default function SlideRenderer({
   // Keep playback simple: always advance when a video ends.
 
   const currentFile = files[index] || null;
+  const currentTemplate =
+    sourceType === SOURCE_TYPES.template && templatePlaylist.length
+      ? templatePlaylist[templateIndex % templatePlaylist.length]
+      : null;
   const currentFileType = String(currentFile?.type || "").toLowerCase();
   const sectionHasVideo =
     sourceType === SOURCE_TYPES.multimedia && files.some((entry) => isVideoFile(entry));
@@ -1889,6 +1949,28 @@ export default function SlideRenderer({
     const sectionSlideMs = getSlideDurationMs();
 
     if (sourceType !== SOURCE_TYPES.multimedia) {
+      if (sourceType === SOURCE_TYPES.template) {
+        const sectionSlideMs = getSlideDurationMs();
+        const itemDurationMs = sectionSlideMs;
+        const itemElapsedMs = Math.max(0, Date.now() - templateChangedAtRef.current);
+        const totalItems = Math.max(1, templatePlaylist.length);
+        const playlistTotalMs = itemDurationMs * totalItems;
+        const playlistElapsedMs = itemDurationMs * templateIndex + Math.min(itemElapsedMs, itemDurationMs);
+        onPlaybackChange({
+          section,
+          sourceType,
+          title: currentTemplate?.titleText || currentTemplate?.name || "Template",
+          uri: "template://local",
+          cacheStatus: "Cached",
+          itemIndex: Math.min(totalItems, templateIndex + 1),
+          totalItems,
+          itemElapsedMs: Math.min(itemElapsedMs, itemDurationMs),
+          itemDurationMs,
+          playlistElapsedMs,
+          playlistTotalMs,
+        });
+        return;
+      }
       onPlaybackChange({
         section,
         sourceType,
@@ -1990,7 +2072,7 @@ export default function SlideRenderer({
       playlistTotalMs,
       progressOnly: isVideo,
     });
-  }, [files, index, sectionIndex, sourceType, sourceUrl, uri, onPlaybackChange, resumePositionMs, playbackClock, server, cacheProgressByPath]);
+  }, [files, index, sectionIndex, sourceType, sourceUrl, uri, onPlaybackChange, resumePositionMs, playbackClock, server, cacheProgressByPath, templateIndex, templatePlaylist, currentTemplate]);
 
   useEffect(() => {
     const resetPdfState = () => {
@@ -2104,6 +2186,43 @@ export default function SlideRenderer({
       setImageVisibleSlot(slot);
     }
   };
+
+  if (sourceType === SOURCE_TYPES.template) {
+    if (!currentTemplate) {
+      return (
+        <View style={styles.center}>
+          <Text style={{ color: "#fff" }}>No Template Selected</Text>
+        </View>
+      );
+    }
+
+    return (
+      <Animated.View
+        style={[
+          styles.container,
+          {
+            opacity: templateOpacity,
+            transform: [
+              { perspective: 1000 },
+              { translateX },
+              { translateY },
+              { scale },
+              {
+                rotateY: rotateY.interpolate({
+                  inputRange: [-180, 180],
+                  outputRange: ["-180deg", "180deg"],
+                }),
+              },
+            ],
+          },
+        ]}
+      >
+        <View style={mediaRotateLayerStyle}>
+          <TemplateRenderer template={currentTemplate} />
+        </View>
+      </Animated.View>
+    );
+  }
 
   if (sourceType !== SOURCE_TYPES.multimedia) {
     if (!uri) {
