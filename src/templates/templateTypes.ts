@@ -25,6 +25,7 @@ export interface TemplateInstance {
   secondaryColor: string;
   backgroundColor: string;
   backgroundImageUrl?: string;
+  fontFamily?: string;
   fontScale?: number;
   titleScale?: number;
   subtitleScale?: number;

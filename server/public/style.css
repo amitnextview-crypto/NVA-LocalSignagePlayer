@@ -1201,7 +1201,7 @@ input[type="range"] {
 }
 
 .template-editor-preview-canvas {
-  max-height: 330px;
+  max-height: 460px;
   overflow-y: auto;
   padding-right: 4px;
 }
@@ -1323,8 +1323,9 @@ input[type="range"] {
   --tpl-primary: #2563eb;
   --tpl-secondary: #f4f7fb;
   --tpl-bg: #08121b;
+  --tpl-font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --tpl-shell-bg: var(--tpl-bg);
-  --tpl-overlay: linear-gradient(rgba(4, 10, 16, 0.24), rgba(4, 10, 16, 0.24));
+  --tpl-overlay: none;
   --tpl-surface: rgba(37, 99, 235, 0.16);
   --tpl-border: rgba(37, 99, 235, 0.34);
   --tpl-muted: rgba(244, 247, 251, 0.72);
@@ -1347,21 +1348,22 @@ input[type="range"] {
   --tpl-row-title-size: calc(13px * var(--tpl-scale));
   --tpl-row-meta-size: calc(10px * var(--tpl-scale));
   --tpl-row-value-size: calc(16px * var(--tpl-scale));
+  --tpl-row-title-line: calc(var(--tpl-row-title-size) * 1.16);
+  --tpl-row-meta-line: calc(var(--tpl-row-meta-size) * 1.28);
+  --tpl-row-value-line: calc(var(--tpl-row-value-size) * 1.08);
   --tpl-bg-size: 100%;
   min-height: 0;
   height: 100%;
   border-radius: 18px;
   border: 1px solid var(--tpl-border);
-  background:
-    var(--tpl-overlay),
-    var(--tpl-bg-image),
-    radial-gradient(circle at top right, rgba(255, 255, 255, 0.08), transparent 28%),
-    linear-gradient(160deg, var(--tpl-shell-bg), rgba(6, 12, 18, 0.96));
-  background-size: auto, var(--tpl-bg-size) var(--tpl-bg-size), auto, auto;
-  background-position: center, center, top right, center;
-  background-repeat: no-repeat;
+  background-color: var(--tpl-shell-bg);
+  background-image: var(--tpl-overlay), var(--tpl-bg-image);
+  background-size: auto, var(--tpl-bg-size) var(--tpl-bg-size);
+  background-position: center, center;
+  background-repeat: no-repeat, no-repeat;
   padding: 14px;
   color: var(--tpl-secondary);
+  font-family: var(--tpl-font-family);
 }
 
 .template-render.is-compact {
@@ -1468,6 +1470,9 @@ input[type="range"] {
 .template-render-price-item strong,
 .template-render-list-item strong {
   font-size: var(--tpl-row-title-size);
+  line-height: var(--tpl-row-title-line);
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .template-render-row-main span,
@@ -1475,6 +1480,10 @@ input[type="range"] {
 .template-render-list-item small {
   color: var(--tpl-muted);
   font-size: var(--tpl-row-meta-size);
+  line-height: var(--tpl-row-meta-line);
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  white-space: normal;
 }
 
 .template-render-row-side,
@@ -1492,16 +1501,23 @@ input[type="range"] {
   color: var(--tpl-secondary);
   font-style: normal;
   font-size: var(--tpl-row-value-size);
+  line-height: var(--tpl-row-value-line);
   font-weight: 800;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .template-render-row-side span,
 .template-render-price-side span {
   color: var(--tpl-primary);
   font-size: calc(var(--tpl-row-meta-size) * 0.9);
+  line-height: calc(var(--tpl-row-meta-line) * 0.92);
   font-weight: 800;
   text-transform: uppercase;
   letter-spacing: 0.7px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .template-render-list-item {
@@ -1588,16 +1604,26 @@ input[type="range"] {
   font-size: calc(9px * var(--tpl-scale));
   text-transform: uppercase;
   letter-spacing: 0.8px;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  white-space: normal;
 }
 
 .template-render-metric strong {
   font-size: calc(20px * var(--tpl-scale));
+  line-height: var(--tpl-row-value-line);
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .template-render-metric small {
   color: var(--tpl-primary);
   font-size: calc(10px * var(--tpl-scale));
   font-weight: 700;
+  line-height: var(--tpl-row-meta-line);
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  white-space: normal;
 }
 
 .youtube-redownload-row {

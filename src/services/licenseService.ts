@@ -2,39 +2,98 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 
 const LICENSE_KEY_STORAGE_KEY = "license_key_v1";
 const LICENSE_DEVICE_STORAGE_KEY = "license_device_id_v1";
-const LICENSE_GENERATOR_BASE_URL = "https://local-signage-player-tv-admin-user.vercel.app"; // Set this to your license generator server URL
-const LICENSE_TIMEOUT_MS = 8000;
+const LICENSE_GENERATOR_BASE_URLS = [
+  "https://nva-signageplayertv-licences-fmza.vercel.app",
+  "https://local-signage-player-tv-admin-user.vercel.app",
+];
+const LICENSE_TIMEOUT_MS = 12000;
+const LICENSE_RETRY_COUNT = 3;
+const LICENSE_RETRY_BACKOFF_MS = 900;
 
 function normalizeKey(value: string): string {
   return String(value || "").trim().toUpperCase();
 }
 
 function hasConfiguredGeneratorUrl() {
-  return /^https?:\/\//i.test(LICENSE_GENERATOR_BASE_URL);
+  return LICENSE_GENERATOR_BASE_URLS.some((url) => /^https?:\/\//i.test(String(url || "")));
 }
 
 function fetchWithTimeout(url: string, timeoutMs = LICENSE_TIMEOUT_MS): Promise<Response> {
-  return Promise.race([
+  const controller = typeof AbortController === "function" ? new AbortController() : undefined;
+  return new Promise<Response>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      controller?.abort();
+      reject(new Error("license-timeout"));
+    }, timeoutMs);
+
     fetch(url, {
       headers: {
         "Cache-Control": "no-cache",
         Pragma: "no-cache",
       },
-    }),
-    new Promise<Response>((_, reject) =>
-      setTimeout(() => reject(new Error("license-timeout")), timeoutMs)
-    ),
-  ]);
+      signal: controller?.signal,
+    })
+      .then((response) => {
+        clearTimeout(timer);
+        resolve(response);
+      })
+      .catch((error) => {
+        clearTimeout(timer);
+        reject(error);
+      });
+  });
+}
+
+function wait(ms: number) {
+  return new Promise<void>((resolve) => setTimeout(() => resolve(), ms));
+}
+
+function getLicenseGeneratorUrls(deviceId: string): string[] {
+  const safeDeviceId = encodeURIComponent(String(deviceId || "").trim());
+  return Array.from(
+    new Set(
+      LICENSE_GENERATOR_BASE_URLS
+        .map((baseUrl) => String(baseUrl || "").trim().replace(/\/+$/, ""))
+        .filter((baseUrl) => /^https?:\/\//i.test(baseUrl))
+        .map((baseUrl) => `${baseUrl}/api/generate?deviceId=${safeDeviceId}`)
+    )
+  );
+}
+
+async function readLicenseKeyFromUrl(url: string): Promise<string | null> {
+  const res = await fetchWithTimeout(url, LICENSE_TIMEOUT_MS);
+  if (!res.ok) return null;
+  const data = await res.json();
+  const normalized = normalizeKey(String(data?.licenseKey || ""));
+  return normalized || null;
 }
 
 async function getExpectedLicenseFromServer(deviceId: string): Promise<string | null> {
   if (!hasConfiguredGeneratorUrl()) return null;
-  const res = await fetchWithTimeout(
-    `${LICENSE_GENERATOR_BASE_URL}/api/generate?deviceId=${encodeURIComponent(deviceId)}`
-  );
-  if (!res.ok) return null;
-  const data = await res.json();
-  return normalizeKey(String(data?.licenseKey || ""));
+  const urls = getLicenseGeneratorUrls(deviceId);
+  let lastTimeoutError: Error | null = null;
+
+  for (let attempt = 0; attempt < LICENSE_RETRY_COUNT; attempt += 1) {
+    for (const url of urls) {
+      try {
+        const licenseKey = await readLicenseKeyFromUrl(url);
+        if (licenseKey) return licenseKey;
+      } catch (error: any) {
+        if (String(error?.message || "").includes("license-timeout")) {
+          lastTimeoutError = error;
+        }
+      }
+    }
+
+    if (attempt < LICENSE_RETRY_COUNT - 1) {
+      await wait(LICENSE_RETRY_BACKOFF_MS * (attempt + 1));
+    }
+  }
+
+  if (lastTimeoutError) {
+    throw lastTimeoutError;
+  }
+  return null;
 }
 
 export async function readStoredLicense() {
@@ -78,7 +137,7 @@ export async function activateDeviceWithKey(deviceId: string, enteredKey: string
     return {
       success: false,
       message:
-        "License server URL not configured. Set LICENSE_GENERATOR_BASE_URL in app.",
+        "License server URL not configured. Set LICENSE_GENERATOR_BASE_URLS in app.",
     };
   }
 

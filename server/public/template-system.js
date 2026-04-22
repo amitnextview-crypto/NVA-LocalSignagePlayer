@@ -1,5 +1,60 @@
 (function () {
   const SOURCE_TYPE = "template";
+  const TEMPLATE_LIBRARY_OVERRIDES_KEY = "template_library_overrides_v1";
+  const TEMPLATE_ROW_GAP_MAX = 12;
+  const TEMPLATE_ROW_BOX_MAX = 7.6;
+  const TEMPLATE_FONT_OPTIONS = [
+    {
+      value: "system",
+      label: "System UI",
+      webFamily: 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+    },
+    {
+      value: "roboto",
+      label: "Roboto",
+      webFamily: '"Roboto", "Segoe UI", sans-serif',
+    },
+    {
+      value: "segoe",
+      label: "Segoe UI",
+      webFamily: '"Segoe UI", Tahoma, Geneva, Verdana, sans-serif',
+    },
+    {
+      value: "helvetica",
+      label: "Helvetica",
+      webFamily: '"Helvetica Neue", Helvetica, Arial, sans-serif',
+    },
+    {
+      value: "georgia",
+      label: "Georgia",
+      webFamily: 'Georgia, "Times New Roman", serif',
+    },
+    {
+      value: "times",
+      label: "Times New Roman",
+      webFamily: '"Times New Roman", Times, serif',
+    },
+    {
+      value: "verdana",
+      label: "Verdana",
+      webFamily: "Verdana, Geneva, sans-serif",
+    },
+    {
+      value: "trebuchet",
+      label: "Trebuchet MS",
+      webFamily: '"Trebuchet MS", Helvetica, sans-serif',
+    },
+    {
+      value: "courier",
+      label: "Courier New",
+      webFamily: '"Courier New", Courier, monospace',
+    },
+    {
+      value: "casual",
+      label: "Casual",
+      webFamily: '"Comic Sans MS", "Comic Sans", cursive',
+    },
+  ];
   const CATEGORY_DEFINITIONS = [
     {
       category: "Railway Station",
@@ -801,14 +856,21 @@
     const badgeBoost = Number(instance?.badgeScale || 1);
     const logoBoost = Number(instance?.logoScale || 1);
     const rowImageBoost = Number(instance?.rowImageScale || 1);
+    const rowTextBoost = Number(instance?.rowTextScale || 1);
+    const rowMetaBoost = Number(instance?.rowMetaScale || 1);
+    const rowValueBoost = Number(instance?.rowValueScale || 1);
     const gapBoost = Number(instance?.rowGapScale || 1);
     const bodyGap = Math.round((compact ? (crowded ? 8 : 9) : crowded ? 10 : 12) * gapBoost);
     const rowBoxBoost = Number(instance?.rowBoxScale || 1);
-    const rowPadV = compact ? 7 : 9;
+    const rowPadV = Math.round((compact ? 7 : 9) * Math.min(2.8, 0.92 + rowBoxBoost * 0.34 + rowMetaBoost * 0.08));
     const rowPadH = compact ? 10 : 12;
     const logoSize = clamp((compact ? (crowded ? 38 : 44) : spacious ? (crowded ? 60 : 74) : 54) * logoBoost, 26, 120);
     const rowImageSize = clamp((compact ? (crowded ? 42 : 48) : spacious ? (crowded ? 64 : 82) : 56) * rowImageBoost, 28, 132);
-    const sideWidth = compact ? 62 : crowded ? 72 : 86;
+    const sideWidth = clamp(
+      (compact ? 62 : crowded ? 72 : 86) * Math.max(1, rowValueBoost * 0.18 + rowMetaBoost * 0.12),
+      compact ? 62 : 72,
+      compact ? 148 : 220
+    );
     const titleSize = clamp((compact ? 16 : spacious ? 26 : 20) * scaleBase * titleBoost, 12, 52);
     const subtitleSize = clamp((compact ? 9 : spacious ? 13 : 11) * scaleBase * subtitleBoost, 8, 24);
     const badgeSize = clamp((compact ? 8 : 10) * scaleBase * badgeBoost, 7, 22);
@@ -820,14 +882,17 @@
     const bodyHeight = Math.max(120, height - logoSize - titleSize * 2.2 - subtitleSize * 1.6 - headerBottom - bodyTop);
     const rowHeight = clamp(
       ((bodyHeight - bodyGap * Math.max(0, rowCount - 1)) / rowCount) * rowBoxBoost,
-      compact ? 44 : 52,
-      compact ? 72 : 90
+      compact ? 52 : 64,
+      compact ? 168 : 240
     );
     const metricHeight = clamp(
       ((bodyHeight - bodyGap * Math.max(0, metricRowsPerColumn - 1)) / metricRowsPerColumn) * rowBoxBoost,
-      compact ? 54 : 66,
-      compact ? 96 : 120
+      compact ? 64 : 78,
+      compact ? 196 : 280
     );
+    const rowTitleSize = clamp((compact ? 10.5 : 15) * scaleBase * rowTextBoost, 8, 46);
+    const rowMetaSize = clamp((compact ? 7.4 : 10.5) * scaleBase * rowMetaBoost, 6, 34);
+    const rowValueSize = clamp((compact ? 11.5 : 18.5) * scaleBase * rowValueBoost, 9, 52);
 
     return {
       width,
@@ -850,9 +915,12 @@
         `--tpl-row-image-size:${rowImageSize}px`,
         `--tpl-metric-cols:${metricCols}`,
         `--tpl-metric-height:${metricHeight}px`,
-        `--tpl-row-title-size:${clamp((compact ? 10.5 : 15) * scaleBase * Number(instance?.rowTextScale || 1), 8, 34)}px`,
-        `--tpl-row-meta-size:${clamp((compact ? 7.4 : 10.5) * scaleBase * Number(instance?.rowMetaScale || 1), 6, 24)}px`,
-        `--tpl-row-value-size:${clamp((compact ? 11.5 : 18.5) * scaleBase * Number(instance?.rowValueScale || 1), 9, 42)}px`,
+        `--tpl-row-title-size:${rowTitleSize}px`,
+        `--tpl-row-meta-size:${rowMetaSize}px`,
+        `--tpl-row-value-size:${rowValueSize}px`,
+        `--tpl-row-title-line:${Math.round(rowTitleSize * 1.16)}px`,
+        `--tpl-row-meta-line:${Math.round(rowMetaSize * 1.28)}px`,
+        `--tpl-row-value-line:${Math.round(rowValueSize * 1.08)}px`,
         `--tpl-bg-size:${clamp(Number(instance?.backgroundZoom || 1) * 100, 80, 180)}%`,
       ],
     };
@@ -863,6 +931,32 @@
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, "-")
       .replace(/^-+|-+$/g, "")}-${slug}`;
+  }
+
+  function readLibraryOverrides() {
+    try {
+      const raw = window.localStorage?.getItem(TEMPLATE_LIBRARY_OVERRIDES_KEY) || "";
+      const parsed = raw ? JSON.parse(raw) : {};
+      return parsed && typeof parsed === "object" ? parsed : {};
+    } catch (_error) {
+      return {};
+    }
+  }
+
+  function writeLibraryOverrides(overrides) {
+    try {
+      window.localStorage?.setItem(
+        TEMPLATE_LIBRARY_OVERRIDES_KEY,
+        JSON.stringify(overrides && typeof overrides === "object" ? overrides : {})
+      );
+    } catch (_error) {
+    }
+  }
+
+  function resolveTemplateWebFont(value) {
+    const key = String(value || "system").trim().toLowerCase();
+    const match = TEMPLATE_FONT_OPTIONS.find((item) => item.value === key);
+    return match?.webFamily || TEMPLATE_FONT_OPTIONS[0].webFamily;
   }
 
   const TEMPLATE_LIBRARY = CATEGORY_DEFINITIONS.flatMap((group) =>
@@ -882,6 +976,7 @@
           primaryColor: group.accent,
           secondaryColor: "#f4f7fb",
           backgroundColor: "#08121b",
+          fontFamily: "system",
           fontScale: 1,
           titleScale: 1,
           subtitleScale: 1,
@@ -907,8 +1002,19 @@
       };
     })
   );
-
+  const libraryOverrides = readLibraryOverrides();
   const libraryMap = Object.fromEntries(TEMPLATE_LIBRARY.map((item) => [item.id, item]));
+  TEMPLATE_LIBRARY.forEach((item) => {
+    const overrides = libraryOverrides[item.id];
+    if (!overrides || typeof overrides !== "object") return;
+    const mergedDefaults = buildTemplateInstance(item.id, overrides);
+    if (!mergedDefaults) return;
+    item.defaults = {
+      ...clone(item.defaults),
+      ...clone(mergedDefaults),
+      rows: clone(mergedDefaults.rows || item.defaults.rows || []),
+    };
+  });
   const sectionState = { 1: [], 2: [], 3: [] };
   let changeListener = null;
   let pickerSection = 1;
@@ -949,6 +1055,7 @@
       secondaryColor: String(merged.secondaryColor || "#f4f7fb"),
       backgroundColor: String(merged.backgroundColor || "#08121b"),
       backgroundImageUrl: String(merged.backgroundImageUrl || ""),
+      fontFamily: String(merged.fontFamily || "system"),
       fontScale: Math.max(0.7, Math.min(2, Number(merged.fontScale || 1))),
       titleScale: Math.max(0.7, Math.min(2.4, Number(merged.titleScale || 1))),
       subtitleScale: Math.max(0.7, Math.min(2.4, Number(merged.subtitleScale || 1))),
@@ -958,8 +1065,8 @@
       rowMetaScale: Math.max(0.7, Math.min(2.6, Number(merged.rowMetaScale || 1))),
       rowValueScale: Math.max(0.7, Math.min(2.8, Number(merged.rowValueScale || 1))),
       rowImageScale: Math.max(0.7, Math.min(2.4, Number(merged.rowImageScale || 1))),
-      rowGapScale: Math.max(0.7, Math.min(2, Number(merged.rowGapScale || 1))),
-      rowBoxScale: Math.max(0.7, Math.min(1.9, Number(merged.rowBoxScale || 1))),
+      rowGapScale: Math.max(0.7, Math.min(TEMPLATE_ROW_GAP_MAX, Number(merged.rowGapScale || 1))),
+      rowBoxScale: Math.max(0.7, Math.min(TEMPLATE_ROW_BOX_MAX, Number(merged.rowBoxScale || 1))),
       backgroundZoom: Math.max(0.8, Math.min(1.8, Number(merged.backgroundZoom || 1))),
       logoUrl: String(merged.logoUrl || ""),
       imageUrl: String(merged.imageUrl || ""),
@@ -1215,6 +1322,42 @@
     triggerSectionPreviewRefresh();
   }
 
+  function persistTemplateAsDefault(instance) {
+    const templateId = String(instance?.templateId || "").trim();
+    const base = libraryMap[templateId];
+    if (!templateId || !base) return;
+
+    const nextDefaults = {
+      titleText: String(instance?.titleText || base.defaults.titleText || ""),
+      subtitleText: String(instance?.subtitleText || base.defaults.subtitleText || ""),
+      badgeText: String(instance?.badgeText || ""),
+      primaryColor: String(instance?.primaryColor || base.defaults.primaryColor || "#2563eb"),
+      secondaryColor: String(instance?.secondaryColor || base.defaults.secondaryColor || "#f4f7fb"),
+      backgroundColor: String(instance?.backgroundColor || base.defaults.backgroundColor || "#08121b"),
+      backgroundImageUrl: String(instance?.backgroundImageUrl || ""),
+      fontFamily: String(instance?.fontFamily || base.defaults.fontFamily || "system"),
+      fontScale: Math.max(0.7, Math.min(2, Number(instance?.fontScale || 1))),
+      titleScale: Math.max(0.7, Math.min(2.4, Number(instance?.titleScale || 1))),
+      subtitleScale: Math.max(0.7, Math.min(2.4, Number(instance?.subtitleScale || 1))),
+      badgeScale: Math.max(0.7, Math.min(2.4, Number(instance?.badgeScale || 1))),
+      logoScale: Math.max(0.7, Math.min(2.4, Number(instance?.logoScale || 1))),
+      rowTextScale: Math.max(0.7, Math.min(2.6, Number(instance?.rowTextScale || 1))),
+      rowMetaScale: Math.max(0.7, Math.min(2.6, Number(instance?.rowMetaScale || 1))),
+      rowValueScale: Math.max(0.7, Math.min(2.8, Number(instance?.rowValueScale || 1))),
+      rowImageScale: Math.max(0.7, Math.min(2.4, Number(instance?.rowImageScale || 1))),
+      rowGapScale: Math.max(0.7, Math.min(TEMPLATE_ROW_GAP_MAX, Number(instance?.rowGapScale || 1))),
+      rowBoxScale: Math.max(0.7, Math.min(TEMPLATE_ROW_BOX_MAX, Number(instance?.rowBoxScale || 1))),
+      backgroundZoom: Math.max(0.8, Math.min(1.8, Number(instance?.backgroundZoom || 1))),
+      logoUrl: String(instance?.logoUrl || instance?.imageUrl || ""),
+      imageUrl: String(instance?.imageUrl || instance?.logoUrl || ""),
+      rows: ensureRows(instance).rows.slice(0, 5).map(normalizeRow),
+    };
+
+    base.defaults = clone(nextDefaults);
+    libraryOverrides[templateId] = clone(nextDefaults);
+    writeLibraryOverrides(libraryOverrides);
+  }
+
   function openEditor(section, index) {
     const templates = getSectionTemplates(section);
     const existing = templates[index];
@@ -1279,6 +1422,14 @@
             <input id="templateEditSecondary" type="color" value="${escapeHtml(instance.secondaryColor)}" />
             <label>Background Color</label>
             <input id="templateEditBackground" type="color" value="${escapeHtml(instance.backgroundColor)}" />
+            <label>Font Family</label>
+            <select id="templateEditFontFamily">
+              ${TEMPLATE_FONT_OPTIONS.map((option) => `
+                <option value="${escapeHtml(option.value)}" ${String(instance.fontFamily || "system") === option.value ? "selected" : ""}>
+                  ${escapeHtml(option.label)}
+                </option>
+              `).join("")}
+            </select>
             <label>Background Image URL</label>
             <input id="templateEditBackgroundImage" type="text" value="${escapeHtml(instance.backgroundImageUrl || "")}" placeholder="https://... or data:image/..." />
             <label>Base Font</label>
@@ -1300,9 +1451,9 @@
             <label>Row Image Size</label>
             <input id="templateEditRowImageScale" type="range" min="0.7" max="2.4" step="0.05" value="${escapeHtml(instance.rowImageScale || 1)}" />
             <label>Row Gap</label>
-            <input id="templateEditRowGapScale" type="range" min="0.7" max="3" step="0.05" value="${escapeHtml(instance.rowGapScale || 1)}" />
+            <input id="templateEditRowGapScale" type="range" min="0.7" max="${TEMPLATE_ROW_GAP_MAX}" step="0.05" value="${escapeHtml(instance.rowGapScale || 1)}" />
             <label>Row Box Size</label>
-            <input id="templateEditRowBoxScale" type="range" min="0.7" max="1.9" step="0.05" value="${escapeHtml(instance.rowBoxScale || 1)}" />
+            <input id="templateEditRowBoxScale" type="range" min="0.7" max="${TEMPLATE_ROW_BOX_MAX}" step="0.05" value="${escapeHtml(instance.rowBoxScale || 1)}" />
             <label>BG Zoom</label>
             <input id="templateEditBackgroundZoom" type="range" min="0.8" max="1.8" step="0.05" value="${escapeHtml(instance.backgroundZoom || 1)}" />
             <label>Logo / Image URL</label>
@@ -1355,6 +1506,7 @@
       primaryColor: document.getElementById("templateEditPrimary")?.value || current.primaryColor,
       secondaryColor: document.getElementById("templateEditSecondary")?.value || current.secondaryColor,
       backgroundColor: document.getElementById("templateEditBackground")?.value || current.backgroundColor,
+      fontFamily: document.getElementById("templateEditFontFamily")?.value || current.fontFamily || "system",
       backgroundImageUrl: document.getElementById("templateEditBackgroundImage")?.value || "",
       fontScale: Number(document.getElementById("templateEditScale")?.value || current.fontScale || 1),
       titleScale: Number(document.getElementById("templateEditTitleScale")?.value || current.titleScale || 1),
@@ -1528,6 +1680,7 @@
   function saveEditor() {
     const next = collectEditorInstance();
     if (!next || !editingTarget) return;
+    persistTemplateAsDefault(next);
     const current = getSectionTemplates(editingTarget.section).slice();
     current[editingTarget.index] = next;
     setSectionTemplates(editingTarget.section, current);
@@ -1558,11 +1711,12 @@
       `--tpl-primary:${instance.primaryColor}`,
       `--tpl-secondary:${instance.secondaryColor}`,
       `--tpl-bg:${instance.backgroundColor}`,
+      `--tpl-font-family:${resolveTemplateWebFont(instance.fontFamily)}`,
       `--tpl-shell-bg:${instance.backgroundImageUrl ? "transparent" : instance.backgroundColor}`,
       `--tpl-overlay:${
         instance.backgroundImageUrl
           ? "linear-gradient(rgba(4, 10, 16, 0.12), rgba(4, 10, 16, 0.12))"
-          : "linear-gradient(rgba(4, 10, 16, 0.24), rgba(4, 10, 16, 0.24))"
+          : "none"
       }`,
       `--tpl-surface:${withAlpha(instance.primaryColor, 0.18)}`,
       `--tpl-border:${withAlpha(instance.primaryColor, 0.34)}`,

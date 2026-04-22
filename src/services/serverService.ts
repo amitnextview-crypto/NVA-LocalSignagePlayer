@@ -6,25 +6,43 @@ const SERVER_KEY = "CMS_SERVER";
 const LAST_GOOD_SERVER_KEY = "CMS_SERVER_LAST_GOOD";
 const SERVER_HISTORY_KEY = "CMS_SERVER_HISTORY_V1";
 const FETCH_TIMEOUT = 2500;
-const SCAN_BATCH_SIZE = 48;
+const DIRECT_PROBE_TIMEOUT = 900;
+const DIRECT_CONFIG_TIMEOUT = 1400;
+const SCAN_PROBE_TIMEOUT = 700;
+const SCAN_CONFIG_TIMEOUT = 950;
+const SCAN_BATCH_SIZE = 96;
 const CMS_PORT = 8080;
-const SCAN_COOLDOWN_MS = 4000;
+const SCAN_COOLDOWN_MS = 1200;
+const AGGRESSIVE_SCAN_COOLDOWN_MS = 250;
+const MAX_SERVER_HISTORY = 8;
 const serverListeners = new Set<(url: string) => void>();
 let inFlightFindCMS: Promise<string> | null = null;
 let lastScanAt = 0;
 
 function fetchWithTimeout(url: string, timeout = FETCH_TIMEOUT): Promise<Response> {
-  return Promise.race([
+  const controller = typeof AbortController === "function" ? new AbortController() : undefined;
+  return new Promise<Response>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      controller?.abort();
+      reject(new Error("timeout"));
+    }, timeout);
+
     fetch(url, {
       headers: {
         "Cache-Control": "no-cache",
         Pragma: "no-cache",
       },
-    }),
-    new Promise<Response>((_, reject) =>
-      setTimeout(() => reject(new Error("timeout")), timeout)
-    ),
-  ]);
+      signal: controller?.signal,
+    })
+      .then((response) => {
+        clearTimeout(timer);
+        resolve(response);
+      })
+      .catch((error) => {
+        clearTimeout(timer);
+        reject(error);
+      });
+  });
 }
 
 function normalizeUrl(value: string): string {
@@ -49,14 +67,36 @@ function notifyServerListeners(url: string) {
   });
 }
 
-async function probeCMS(url: string, timeout = FETCH_TIMEOUT): Promise<boolean> {
-  const checks = await Promise.allSettled([
-    fetchWithTimeout(`${url}/ping?ts=${Date.now()}`, timeout),
-    fetchWithTimeout(`${url}/config?ts=${Date.now()}`, timeout + 750),
-  ]);
-  return checks.some(
-    (item) => item.status === "fulfilled" && !!item.value?.ok
-  );
+async function probeCMS(
+  url: string,
+  timeout = FETCH_TIMEOUT,
+  configTimeout = timeout + 250
+): Promise<boolean> {
+  return new Promise<boolean>((resolve) => {
+    let completed = 0;
+    let settled = false;
+    const finish = (ok: boolean) => {
+      if (settled) return;
+      if (ok) {
+        settled = true;
+        resolve(true);
+        return;
+      }
+      completed += 1;
+      if (completed >= 2) {
+        settled = true;
+        resolve(false);
+      }
+    };
+
+    fetchWithTimeout(`${url}/ping?ts=${Date.now()}`, timeout)
+      .then((response) => finish(!!response?.ok))
+      .catch(() => finish(false));
+
+    fetchWithTimeout(`${url}/config?ts=${Date.now()}`, configTimeout)
+      .then((response) => finish(!!response?.ok))
+      .catch(() => finish(false));
+  });
 }
 
 export async function verifyCMS(url: string, timeout = 4000): Promise<{
@@ -89,7 +129,7 @@ async function rememberServer(url: string) {
   const normalized = normalizeUrl(url);
   if (!normalized || isLocalhostUrl(normalized)) return;
   const existing = await readServerHistory();
-  const next = [normalized, ...existing.filter((item) => item !== normalized)].slice(0, 8);
+  const next = [normalized, ...existing.filter((item) => item !== normalized)].slice(0, MAX_SERVER_HISTORY);
   await AsyncStorage.setItem(SERVER_HISTORY_KEY, JSON.stringify(next));
 }
 
@@ -183,7 +223,7 @@ async function runProbeBatch(candidates: string[]): Promise<string> {
     }
 
     candidates.forEach((candidate) => {
-      probeCMS(candidate)
+      probeCMS(candidate, SCAN_PROBE_TIMEOUT, SCAN_CONFIG_TIMEOUT)
         .then((ok) => {
           if (ok && !settled) {
             settled = true;
@@ -205,12 +245,45 @@ async function runProbeBatch(candidates: string[]): Promise<string> {
   });
 }
 
+async function findReachableCandidate(
+  candidates: string[],
+  timeout = DIRECT_PROBE_TIMEOUT
+): Promise<string> {
+  const uniqueCandidates = Array.from(
+    new Set(candidates.map((candidate) => normalizeUrl(candidate)).filter(Boolean))
+  );
+
+  return new Promise<string>((resolve) => {
+    let settled = false;
+    let pending = uniqueCandidates.length;
+
+    if (!pending) {
+      resolve("");
+      return;
+    }
+
+    uniqueCandidates.forEach((candidate) => {
+      probeCMS(candidate, timeout, DIRECT_CONFIG_TIMEOUT)
+        .then((ok) => {
+          if (ok && !settled) {
+            settled = true;
+            resolve(candidate);
+            return;
+          }
+          pending -= 1;
+          if (!pending && !settled) resolve("");
+        })
+        .catch(() => {
+          pending -= 1;
+          if (!pending && !settled) resolve("");
+        });
+    });
+  });
+}
+
 async function scanSubnet(base: string, hostHints: number[] = []): Promise<string> {
   if (!base) return "";
-  const hosts: number[] = [];
-  for (let i = 1; i < 255; i += 1) hosts.push(i);
-
-  const ordered = buildPriorityHosts(hostHints.length ? hostHints : hosts);
+  const ordered = buildPriorityHosts(hostHints);
 
   for (let i = 0; i < ordered.length; i += SCAN_BATCH_SIZE) {
     const batch = ordered.slice(i, i + SCAN_BATCH_SIZE);
@@ -262,13 +335,41 @@ async function collectSubnetBases(savedCandidates: string[]): Promise<{
   };
 }
 
+async function scanAllBases(bases: string[], hostHints: number[]): Promise<string> {
+  const uniqueBases = Array.from(new Set(bases.filter(Boolean)));
+  return new Promise<string>((resolve) => {
+    let settled = false;
+    let pending = uniqueBases.length;
+
+    if (!pending) {
+      resolve("");
+      return;
+    }
+
+    uniqueBases.forEach((base) => {
+      scanSubnet(base, hostHints)
+        .then((found) => {
+          if (found && !settled) {
+            settled = true;
+            resolve(found);
+            return;
+          }
+          pending -= 1;
+          if (!pending && !settled) resolve("");
+        })
+        .catch(() => {
+          pending -= 1;
+          if (!pending && !settled) resolve("");
+        });
+    });
+  });
+}
+
 async function discoverCMS(forceScan = false): Promise<string> {
   const directCandidates = await getDirectCandidates();
-
-  for (const candidate of directCandidates) {
-    if (await probeCMS(candidate)) {
-      return saveAndReturn(candidate);
-    }
+  const reachableDirectCandidate = await findReachableCandidate(directCandidates);
+  if (reachableDirectCandidate) {
+    return saveAndReturn(reachableDirectCandidate);
   }
 
   const saved = normalizeUrl(String((await AsyncStorage.getItem(SERVER_KEY)) || ""));
@@ -278,7 +379,11 @@ async function discoverCMS(forceScan = false): Promise<string> {
     }
   }
 
-  if (!forceScan && Date.now() - lastScanAt < SCAN_COOLDOWN_MS) {
+  const scanCooldownMs = directCandidates.length
+    ? SCAN_COOLDOWN_MS
+    : AGGRESSIVE_SCAN_COOLDOWN_MS;
+
+  if (!forceScan && Date.now() - lastScanAt < scanCooldownMs) {
     return "";
   }
 
@@ -286,11 +391,9 @@ async function discoverCMS(forceScan = false): Promise<string> {
 
   try {
     const { bases, hostHints } = await collectSubnetBases(directCandidates);
-    for (const base of bases) {
-      const found = await scanSubnet(base, hostHints);
-      if (found) {
-        return saveAndReturn(found);
-      }
+    const found = await scanAllBases(bases, hostHints);
+    if (found) {
+      return saveAndReturn(found);
     }
   } catch (e) {
     console.log("Network scan failed", e);
@@ -339,10 +442,12 @@ export async function restoreServerFromStorage(): Promise<string> {
 
 export async function findKnownCMS(): Promise<string> {
   const directCandidates = await getDirectCandidates();
-  for (const candidate of directCandidates) {
-    if (await probeCMS(candidate)) {
-      return saveAndReturn(candidate);
-    }
+  const reachableDirectCandidate = await findReachableCandidate(
+    directCandidates,
+    DIRECT_PROBE_TIMEOUT
+  );
+  if (reachableDirectCandidate) {
+    return saveAndReturn(reachableDirectCandidate);
   }
   return "";
 }

@@ -3,27 +3,27 @@
     "sections": {
       "1": {
         "section": 1,
-        "cycleId": "1-1776767770285_11n6wc",
-        "syncAt": 1776767773578,
-        "updatedAt": 1776767770572,
+        "cycleId": "1-1776843139610_6zsk36",
+        "syncAt": 1776843142755,
+        "updatedAt": 1776843139750,
         "fileCount": 1,
-        "mediaSignature": "0cfebe17-50ca-4261-903f-ac4b9164f97f.jpg",
+        "mediaSignature": "youtube-KBC_Kiara_Advani_Dieting_l_KBC_New_Season_Full_Episode_l_Vicky-Gw8CZzgY8A0.mp4",
         "targetDevice": "all"
       },
       "2": {
         "section": 2,
-        "cycleId": "2-cleared-1776770245138",
-        "syncAt": 1776770245139,
-        "updatedAt": 1776770245138,
+        "cycleId": "2-cleared-1776844369075",
+        "syncAt": 1776844369075,
+        "updatedAt": 1776844369075,
         "fileCount": 0,
         "mediaSignature": "",
         "targetDevice": "all"
       },
       "3": {
         "section": 3,
-        "cycleId": "3-cleared-1776770245139",
-        "syncAt": 1776770245140,
-        "updatedAt": 1776770245139,
+        "cycleId": "3-cleared-1776844369076",
+        "syncAt": 1776844369076,
+        "updatedAt": 1776844369076,
         "fileCount": 0,
         "mediaSignature": "",
         "targetDevice": "all"
@@ -35,18 +35,18 @@
       "sections": {
         "2": {
           "section": 2,
-          "cycleId": "2-cleared-1776770245141",
-          "syncAt": 1776770245142,
-          "updatedAt": 1776770245141,
+          "cycleId": "2-cleared-1776844369078",
+          "syncAt": 1776844369078,
+          "updatedAt": 1776844369078,
           "fileCount": 0,
           "mediaSignature": "",
           "targetDevice": "4aa1624c74676d0b"
         },
         "3": {
           "section": 3,
-          "cycleId": "3-cleared-1776770245143",
-          "syncAt": 1776770245144,
-          "updatedAt": 1776770245143,
+          "cycleId": "3-cleared-1776844369079",
+          "syncAt": 1776844369080,
+          "updatedAt": 1776844369079,
           "fileCount": 0,
           "mediaSignature": "",
           "targetDevice": "4aa1624c74676d0b"
@@ -57,43 +57,21 @@
       "sections": {
         "2": {
           "section": 2,
-          "cycleId": "2-cleared-1776770245147",
-          "syncAt": 1776770245148,
-          "updatedAt": 1776770245147,
+          "cycleId": "2-cleared-1776844369080",
+          "syncAt": 1776844369081,
+          "updatedAt": 1776844369080,
           "fileCount": 0,
           "mediaSignature": "",
           "targetDevice": "aa57fb14dd658b75"
         },
         "3": {
           "section": 3,
-          "cycleId": "3-cleared-1776770245150",
-          "syncAt": 1776770245151,
-          "updatedAt": 1776770245150,
+          "cycleId": "3-cleared-1776844369082",
+          "syncAt": 1776844369083,
+          "updatedAt": 1776844369082,
           "fileCount": 0,
           "mediaSignature": "",
           "targetDevice": "aa57fb14dd658b75"
-        }
-      }
-    },
-    "group_office": {
-      "sections": {
-        "2": {
-          "section": 2,
-          "cycleId": "2-cleared-1776770245152",
-          "syncAt": 1776770245153,
-          "updatedAt": 1776770245152,
-          "fileCount": 0,
-          "mediaSignature": "",
-          "targetDevice": "group_office"
-        },
-        "3": {
-          "section": 3,
-          "cycleId": "3-cleared-1776770245155",
-          "syncAt": 1776770245156,
-          "updatedAt": 1776770245155,
-          "fileCount": 0,
-          "mediaSignature": "",
-          "targetDevice": "group_office"
         }
       }
     },
@@ -101,21 +79,43 @@
       "sections": {
         "2": {
           "section": 2,
-          "cycleId": "2-cleared-1776770245145",
-          "syncAt": 1776770245145,
-          "updatedAt": 1776770245145,
+          "cycleId": "2-cleared-1776844369083",
+          "syncAt": 1776844369084,
+          "updatedAt": 1776844369083,
           "fileCount": 0,
           "mediaSignature": "",
           "targetDevice": "868e5a4be1b038ea"
         },
         "3": {
           "section": 3,
-          "cycleId": "3-cleared-1776770245146",
-          "syncAt": 1776770245146,
-          "updatedAt": 1776770245146,
+          "cycleId": "3-cleared-1776844369085",
+          "syncAt": 1776844369086,
+          "updatedAt": 1776844369085,
           "fileCount": 0,
           "mediaSignature": "",
           "targetDevice": "868e5a4be1b038ea"
+        }
+      }
+    },
+    "__incoming": {
+      "sections": {
+        "2": {
+          "section": 2,
+          "cycleId": "2-cleared-1776844369132",
+          "syncAt": 1776844369133,
+          "updatedAt": 1776844369132,
+          "fileCount": 0,
+          "mediaSignature": "",
+          "targetDevice": "__incoming"
+        },
+        "3": {
+          "section": 3,
+          "cycleId": "3-cleared-1776844369134",
+          "syncAt": 1776844369134,
+          "updatedAt": 1776844369134,
+          "fileCount": 0,
+          "mediaSignature": "",
+          "targetDevice": "__incoming"
         }
       }
     }

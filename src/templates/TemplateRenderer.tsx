@@ -2,6 +2,26 @@ import React, { useMemo, useState } from "react";
 import { Image, LayoutChangeEvent, StyleSheet, Text, View } from "react-native";
 import type { TemplateInstance, TemplateRow } from "./templateTypes";
 
+const TEMPLATE_ROW_GAP_MAX = 12;
+const TEMPLATE_ROW_BOX_MAX = 7.6;
+const TEMPLATE_FONT_MAP: Record<string, string> = {
+  system: "sans-serif",
+  roboto: "Roboto",
+  segoe: "sans-serif",
+  helvetica: "sans-serif",
+  georgia: "serif",
+  times: "serif",
+  verdana: "sans-serif",
+  trebuchet: "sans-serif",
+  courier: "monospace",
+  casual: "casual",
+};
+
+function resolveNativeFontFamily(value: string): string {
+  const key = String(value || "").trim().toLowerCase();
+  return TEMPLATE_FONT_MAP[key] || "sans-serif";
+}
+
 function withAlpha(hex: string, alpha: number) {
   const raw = String(hex || "#2563eb").replace("#", "").trim();
   const full =
@@ -44,6 +64,7 @@ function normalizeTemplate(template: any): TemplateInstance | null {
     secondaryColor: String(template?.secondaryColor || "#f4f7fb"),
     backgroundColor: String(template?.backgroundColor || "#08121b"),
     backgroundImageUrl: String(template?.backgroundImageUrl || ""),
+    fontFamily: String(template?.fontFamily || "system"),
     fontScale: Math.max(0.7, Math.min(2, Number(template?.fontScale || 1))),
     titleScale: Math.max(0.7, Math.min(2.4, Number(template?.titleScale || 1))),
     subtitleScale: Math.max(0.7, Math.min(2.4, Number(template?.subtitleScale || 1))),
@@ -53,8 +74,8 @@ function normalizeTemplate(template: any): TemplateInstance | null {
     rowMetaScale: Math.max(0.7, Math.min(2.6, Number(template?.rowMetaScale || 1))),
     rowValueScale: Math.max(0.7, Math.min(2.8, Number(template?.rowValueScale || 1))),
     rowImageScale: Math.max(0.7, Math.min(2.4, Number(template?.rowImageScale || 1))),
-    rowGapScale: Math.max(0.7, Math.min(3, Number(template?.rowGapScale || 1))),
-    rowBoxScale: Math.max(0.7, Math.min(1.9, Number(template?.rowBoxScale || 1))),
+    rowGapScale: Math.max(0.7, Math.min(TEMPLATE_ROW_GAP_MAX, Number(template?.rowGapScale || 1))),
+    rowBoxScale: Math.max(0.7, Math.min(TEMPLATE_ROW_BOX_MAX, Number(template?.rowBoxScale || 1))),
     backgroundZoom: Math.max(0.8, Math.min(1.8, Number(template?.backgroundZoom || 1))),
     logoUrl: String(template?.logoUrl || ""),
     imageUrl: String(template?.imageUrl || ""),
@@ -101,9 +122,12 @@ export default function TemplateRenderer({ template }: { template: any }) {
   const spacious = width >= 1100 && height >= 620;
   const mediumLarge = width >= 840 && height >= 460;
   const sparseRows = desiredRows > 0 && desiredRows <= 3;
+  const rowTextScale = Number(safeTemplate.rowTextScale || 1);
+  const rowMetaScale = Number(safeTemplate.rowMetaScale || 1);
+  const rowValueScale = Number(safeTemplate.rowValueScale || 1);
   const bodyGap = Math.round((ultraCompact ? 10 : veryCrowded ? 12 : crowded ? 14 : sparseRows ? 16 : compact ? 16 : 18) * Number(safeTemplate.rowGapScale || 1));
   const rowBoxScale = Number(safeTemplate.rowBoxScale || 1);
-  const rowVerticalPadding = ultraCompact ? 7 : crowded ? 9 : 10;
+  const rowVerticalPadding = Math.round((ultraCompact ? 7 : crowded ? 9 : 10) * Math.min(2.8, 0.92 + rowBoxScale * 0.26 + rowMetaScale * 0.08));
   const rowHorizontalPadding = ultraCompact ? 10 : crowded ? 12 : 14;
   const rowRadius = ultraCompact ? 10 : crowded ? 12 : 16;
   const baseScale =
@@ -119,6 +143,7 @@ export default function TemplateRenderer({ template }: { template: any }) {
     muted: withAlpha(safeTemplate.secondaryColor, 0.72),
   };
   const rows = safeTemplate.rows.slice(0, 5);
+  const nativeFontFamily = resolveNativeFontFamily(String(safeTemplate.fontFamily || "system"));
   const logoUri = String(safeTemplate.logoUrl || safeTemplate.imageUrl || "").trim();
   const backgroundImageUri = String(safeTemplate.backgroundImageUrl || "").trim();
   const logoSize = clamp((ultraCompact
@@ -141,7 +166,9 @@ export default function TemplateRenderer({ template }: { template: any }) {
   const rootPaddingV = ultraCompact ? 6 : crowded ? (compact ? 7 : 10) : compact ? 10 : 14;
   const headerMarginBottom = ultraCompact ? 6 : crowded ? (compact ? 6 : 8) : 10;
   const bodyTopGap = ultraCompact ? 4 : crowded ? (compact ? 6 : 8) : compact ? 8 : 12;
-  const rowMetaLines = ultraCompact ? 1 : 2;
+  const rowLabelLines = ultraCompact ? 1 : rowTextScale >= 2.6 ? 4 : rowTextScale >= 1.6 ? 3 : 2;
+  const rowMetaLines = ultraCompact ? 1 : rowMetaScale >= 2.4 ? 5 : rowMetaScale >= 1.6 ? 4 : rowMetaScale >= 1.15 ? 3 : 2;
+  const rowStatusLines = compact ? (rowMetaScale >= 1.5 ? 2 : 1) : rowMetaScale >= 2 ? 3 : rowMetaScale >= 1.2 ? 2 : 1;
   const titleLines = veryCrowded ? 2 : compact ? 3 : 4;
   const subtitleLines = veryCrowded ? 1 : ultraCompact ? 2 : compact ? 3 : 4;
   const metricColumns = singleColumnMetrics || (portrait && desiredRows >= 5) ? 1 : 2;
@@ -154,16 +181,16 @@ export default function TemplateRenderer({ template }: { template: any }) {
   const scheduleRowHeight = rows.length
     ? clamp(
         ((availableBodyHeight - bodyGap * Math.max(0, rows.length - 1)) / rows.length) * rowBoxScale,
-        ultraCompact ? 58 : 78,
-        compact ? 132 : 196
+        ultraCompact ? 58 : 92,
+        compact ? 220 : 320
       )
     : 0;
   const metricRowsPerColumn = Math.max(1, Math.ceil(rows.length / metricColumns));
   const metricCardHeight = rows.length
     ? clamp(
         ((availableBodyHeight - bodyGap * Math.max(0, metricRowsPerColumn - 1)) / metricRowsPerColumn) * rowBoxScale,
-        ultraCompact ? 64 : 78,
-        compact ? 144 : 210
+        ultraCompact ? 64 : 96,
+        compact ? 240 : 340
       )
     : 0;
   const rowDensityScale =
@@ -183,7 +210,11 @@ export default function TemplateRenderer({ template }: { template: any }) {
     : crowded
     ? 78
     : 92) * Number(safeTemplate.rowImageScale || 1), 36, 156);
-  const rowSideWidth = ultraCompact ? 70 : compact ? 94 : crowded ? 116 : 132;
+  const rowSideWidth = clamp(
+    (ultraCompact ? 70 : compact ? 94 : crowded ? 116 : 132) * Math.max(1, rowValueScale * 0.18 + rowMetaScale * 0.12),
+    ultraCompact ? 70 : compact ? 94 : 116,
+    compact ? 220 : 280
+  );
 
   return (
     <View
@@ -236,20 +267,20 @@ export default function TemplateRenderer({ template }: { template: any }) {
           {logoUri ? (
             <Image source={{ uri: logoUri }} resizeMode="contain" style={styles.logoImage} />
           ) : (
-            <Text style={[styles.logoFallback, { color: colors.secondary, fontSize: 12 * baseScale }]}>
+            <Text style={[styles.logoFallback, { color: colors.secondary, fontSize: 12 * baseScale, fontFamily: nativeFontFamily }]}>
               {safeTemplate.category.slice(0, 3).toUpperCase()}
             </Text>
           )}
         </View>
 
         <View style={[styles.headerCopy, compact ? styles.headerCopyCompact : null]}>
-          <Text numberOfLines={titleLines} style={[styles.title, { color: colors.primary, fontSize: titleSize, lineHeight: titleSize * 1.12 }]}>
+          <Text numberOfLines={titleLines} style={[styles.title, { color: colors.primary, fontSize: titleSize, lineHeight: titleSize * 1.12, fontFamily: nativeFontFamily }]}>
             {safeTemplate.titleText}
           </Text>
           {!!safeTemplate.subtitleText && (
             <Text
               numberOfLines={subtitleLines}
-              style={[styles.subtitle, { color: colors.muted, fontSize: subtitleSize, lineHeight: subtitleSize * 1.35 }]}
+              style={[styles.subtitle, { color: colors.muted, fontSize: subtitleSize, lineHeight: subtitleSize * 1.35, fontFamily: nativeFontFamily }]}
             >
               {safeTemplate.subtitleText}
             </Text>
@@ -267,7 +298,7 @@ export default function TemplateRenderer({ template }: { template: any }) {
               },
             ]}
           >
-            <Text numberOfLines={1} style={[styles.badgeText, { color: colors.primary, fontSize: badgeSize }]}>
+            <Text numberOfLines={1} style={[styles.badgeText, { color: colors.primary, fontSize: badgeSize, fontFamily: nativeFontFamily }]}>
               {safeTemplate.badgeText}
             </Text>
           </View>
@@ -293,25 +324,20 @@ export default function TemplateRenderer({ template }: { template: any }) {
                   paddingHorizontal: rowHorizontalPadding,
                   paddingVertical: rowVerticalPadding,
                   minHeight: scheduleRowHeight,
-                  height: scheduleRowHeight,
                   marginBottom: index === rows.length - 1 ? 0 : bodyGap,
                 },
               ]}
             >
               <View style={styles.rowMain}>
                 <Text
-                  numberOfLines={rowMetaLines === 1 ? 1 : 2}
-                  adjustsFontSizeToFit
-                  minimumFontScale={0.7}
-                  style={[styles.rowLabel, { color: colors.secondary, fontSize: (compact ? 12 : 20) * baseScale * rowDensityScale * Number(safeTemplate.rowTextScale || 1) }]}
+                  numberOfLines={rowLabelLines}
+                  style={[styles.rowLabel, { color: colors.secondary, fontSize: (compact ? 12 : 20) * baseScale * rowDensityScale * rowTextScale, lineHeight: (compact ? 12 : 20) * baseScale * rowDensityScale * rowTextScale * 1.15, fontFamily: nativeFontFamily }]}
                 >
                   {row.label}
                 </Text>
                 <Text
                   numberOfLines={rowMetaLines}
-                  adjustsFontSizeToFit
-                  minimumFontScale={0.7}
-                  style={[styles.rowMeta, { color: colors.muted, fontSize: (compact ? 8 : 12.5) * baseScale * rowDensityScale * Number(safeTemplate.rowMetaScale || 1) }]}
+                  style={[styles.rowMeta, { color: colors.muted, fontSize: (compact ? 8 : 12.5) * baseScale * rowDensityScale * rowMetaScale, lineHeight: (compact ? 8 : 12.5) * baseScale * rowDensityScale * rowMetaScale * 1.28, fontFamily: nativeFontFamily }]}
                 >
                   {row.meta || " "}
                 </Text>
@@ -321,15 +347,13 @@ export default function TemplateRenderer({ template }: { template: any }) {
                   numberOfLines={1}
                   adjustsFontSizeToFit
                   minimumFontScale={0.65}
-                  style={[styles.rowValue, { color: colors.secondary, fontSize: (compact ? 13 : 22) * baseScale * rowDensityScale * Number(safeTemplate.rowValueScale || 1) }]}
+                  style={[styles.rowValue, { color: colors.secondary, fontSize: (compact ? 13 : 22) * baseScale * rowDensityScale * rowValueScale, fontFamily: nativeFontFamily }]}
                 >
                   {pickRowValue(row)}
                 </Text>
                 <Text
-                  numberOfLines={1}
-                  adjustsFontSizeToFit
-                  minimumFontScale={0.7}
-                  style={[styles.rowStatus, { color: colors.primary, fontSize: (compact ? 7.5 : 10.5) * baseScale * rowDensityScale * Number(safeTemplate.rowMetaScale || 1) }]}
+                  numberOfLines={rowStatusLines}
+                  style={[styles.rowStatus, { color: colors.primary, fontSize: (compact ? 7.5 : 10.5) * baseScale * rowDensityScale * rowMetaScale, lineHeight: (compact ? 7.5 : 10.5) * baseScale * rowDensityScale * rowMetaScale * 1.15, fontFamily: nativeFontFamily }]}
                 >
                   {row.status || " "}
                 </Text>
@@ -373,7 +397,6 @@ export default function TemplateRenderer({ template }: { template: any }) {
                   paddingHorizontal: rowHorizontalPadding,
                   paddingVertical: rowVerticalPadding,
                   minHeight: scheduleRowHeight,
-                  height: scheduleRowHeight,
                   marginBottom: index === rows.length - 1 ? 0 : bodyGap,
                 },
               ]}
@@ -381,19 +404,15 @@ export default function TemplateRenderer({ template }: { template: any }) {
               <View style={styles.listMain}>
                 <View style={styles.listTopRow}>
                   <Text
-                    numberOfLines={rowMetaLines === 1 ? 1 : 2}
-                    adjustsFontSizeToFit
-                    minimumFontScale={0.7}
-                    style={[styles.listLabel, { color: colors.secondary, fontSize: (compact ? 11.5 : 18) * baseScale * rowDensityScale * Number(safeTemplate.rowTextScale || 1) }]}
+                    numberOfLines={rowLabelLines}
+                    style={[styles.listLabel, { color: colors.secondary, fontSize: (compact ? 11.5 : 18) * baseScale * rowDensityScale * rowTextScale, lineHeight: (compact ? 11.5 : 18) * baseScale * rowDensityScale * rowTextScale * 1.15, fontFamily: nativeFontFamily }]}
                   >
                     {row.label}
                   </Text>
                 </View>
                 <Text
                   numberOfLines={rowMetaLines}
-                  adjustsFontSizeToFit
-                  minimumFontScale={0.7}
-                  style={[styles.listMeta, { color: colors.muted, fontSize: (compact ? 7.8 : 11.5) * baseScale * rowDensityScale * Number(safeTemplate.rowMetaScale || 1) }]}
+                  style={[styles.listMeta, { color: colors.muted, fontSize: (compact ? 7.8 : 11.5) * baseScale * rowDensityScale * rowMetaScale, lineHeight: (compact ? 7.8 : 11.5) * baseScale * rowDensityScale * rowMetaScale * 1.28, fontFamily: nativeFontFamily }]}
                 >
                   {row.meta || row.status || " "}
                 </Text>
@@ -403,15 +422,13 @@ export default function TemplateRenderer({ template }: { template: any }) {
                   numberOfLines={1}
                   adjustsFontSizeToFit
                   minimumFontScale={0.65}
-                  style={[styles.listValue, { color: colors.primary, fontSize: (compact ? 12.5 : 20) * baseScale * rowDensityScale * Number(safeTemplate.rowValueScale || 1) }]}
+                  style={[styles.listValue, { color: colors.primary, fontSize: (compact ? 12.5 : 20) * baseScale * rowDensityScale * rowValueScale, fontFamily: nativeFontFamily }]}
                 >
                   {pickRowValue(row)}
                 </Text>
                 <Text
-                  numberOfLines={1}
-                  adjustsFontSizeToFit
-                  minimumFontScale={0.7}
-                  style={[styles.rowStatus, { color: colors.primary, fontSize: (compact ? 7.5 : 10.5) * baseScale * rowDensityScale * Number(safeTemplate.rowMetaScale || 1) }]}
+                  numberOfLines={rowStatusLines}
+                  style={[styles.rowStatus, { color: colors.primary, fontSize: (compact ? 7.5 : 10.5) * baseScale * rowDensityScale * rowMetaScale, lineHeight: (compact ? 7.5 : 10.5) * baseScale * rowDensityScale * rowMetaScale * 1.15, fontFamily: nativeFontFamily }]}
                 >
                   {row.status || " "}
                 </Text>
@@ -455,7 +472,6 @@ export default function TemplateRenderer({ template }: { template: any }) {
                   borderColor: colors.border,
                   backgroundColor: colors.surface,
                   minHeight: metricCardHeight,
-                  height: metricCardHeight,
                   borderRadius: rowRadius + 2,
                   paddingHorizontal: rowHorizontalPadding,
                   paddingVertical: rowVerticalPadding,
@@ -466,9 +482,7 @@ export default function TemplateRenderer({ template }: { template: any }) {
               <View style={styles.metricHead}>
                 <Text
                   numberOfLines={rowMetaLines}
-                  adjustsFontSizeToFit
-                  minimumFontScale={0.7}
-                  style={[styles.metricLabel, { color: colors.muted, fontSize: (compact ? 7.8 : 11.5) * baseScale * metricDensityScale * Number(safeTemplate.rowTextScale || 1) }]}
+                  style={[styles.metricLabel, { color: colors.muted, fontSize: (compact ? 7.8 : 11.5) * baseScale * metricDensityScale * rowTextScale, lineHeight: (compact ? 7.8 : 11.5) * baseScale * metricDensityScale * rowTextScale * 1.15, fontFamily: nativeFontFamily }]}
                 >
                   {row.label}
                 </Text>
@@ -491,15 +505,13 @@ export default function TemplateRenderer({ template }: { template: any }) {
                 numberOfLines={1}
                 adjustsFontSizeToFit
                 minimumFontScale={0.65}
-                style={[styles.metricValue, { color: colors.secondary, fontSize: (ultraCompact ? 12 : compact ? 18 : 28) * baseScale * metricDensityScale * Number(safeTemplate.rowValueScale || 1) }]}
+                style={[styles.metricValue, { color: colors.secondary, fontSize: (ultraCompact ? 12 : compact ? 18 : 28) * baseScale * metricDensityScale * rowValueScale, fontFamily: nativeFontFamily }]}
               >
                 {pickRowValue(row)}
               </Text>
               <Text
                 numberOfLines={rowMetaLines}
-                adjustsFontSizeToFit
-                minimumFontScale={0.7}
-                style={[styles.metricMeta, { color: colors.primary, fontSize: (compact ? 7.2 : 10.5) * baseScale * metricDensityScale * Number(safeTemplate.rowMetaScale || 1) }]}
+                style={[styles.metricMeta, { color: colors.primary, fontSize: (compact ? 7.2 : 10.5) * baseScale * metricDensityScale * rowMetaScale, lineHeight: (compact ? 7.2 : 10.5) * baseScale * metricDensityScale * rowMetaScale * 1.28, fontFamily: nativeFontFamily }]}
               >
                 {row.meta || row.status || " "}
               </Text>
@@ -625,15 +637,17 @@ const styles = StyleSheet.create({
   },
   rowLabel: {
     fontWeight: "700",
+    flexShrink: 1,
   },
   rowMeta: {
     marginTop: 4,
-    lineHeight: 15,
+    flexShrink: 1,
   },
   rowSide: {
     minWidth: 64,
     alignItems: "center",
     justifyContent: "center",
+    flexShrink: 0,
   },
   rowSideCompact: {
     minWidth: 52,
@@ -675,13 +689,14 @@ const styles = StyleSheet.create({
     flex: 1,
     minWidth: 0,
     fontWeight: "700",
+    flexShrink: 1,
   },
   listValue: {
     fontWeight: "800",
   },
   listMeta: {
     marginTop: 4,
-    lineHeight: 15,
+    flexShrink: 1,
   },
   rowImageWrap: {
     borderWidth: 1,
@@ -729,6 +744,7 @@ const styles = StyleSheet.create({
     textTransform: "uppercase",
     letterSpacing: 0.75,
     flex: 1,
+    flexShrink: 1,
   },
   metricHead: {
     flexDirection: "row",
@@ -743,7 +759,7 @@ const styles = StyleSheet.create({
   metricMeta: {
     marginTop: 8,
     fontWeight: "600",
-    lineHeight: 14,
+    flexShrink: 1,
   },
   metricImageWrap: {
     borderWidth: 1,
