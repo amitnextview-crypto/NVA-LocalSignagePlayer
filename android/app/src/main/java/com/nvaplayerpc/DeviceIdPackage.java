@@ -1,4 +1,4 @@
-package com.signageplayertv;
+package com.nvaplayerpc;
 
 import com.facebook.react.ReactPackage;
 import com.facebook.react.bridge.NativeModule;

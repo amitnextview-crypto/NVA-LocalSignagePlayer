@@ -1,4 +1,4 @@
-package com.signageplayertv;
+package com.nvaplayerpc;
 
 import android.provider.Settings;
 import android.content.Context;

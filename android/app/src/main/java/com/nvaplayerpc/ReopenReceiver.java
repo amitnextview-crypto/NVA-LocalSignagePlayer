@@ -1,4 +1,4 @@
-package com.signageplayertv;
+package com.nvaplayerpc;
 
 import android.content.BroadcastReceiver;
 import android.content.Context;
@@ -7,7 +7,7 @@ import android.content.SharedPreferences;
 import android.util.Log;
 
 public class ReopenReceiver extends BroadcastReceiver {
-    public static final String ACTION_FORCE_REOPEN = "com.signageplayertv.action.FORCE_REOPEN";
+    public static final String ACTION_FORCE_REOPEN = "com.nvaplayerpc.action.FORCE_REOPEN";
     private static final String PREFS_NAME = "kiosk_prefs";
     private static final String KEY_AUTO_REOPEN_ENABLED = "auto_reopen_enabled";
 

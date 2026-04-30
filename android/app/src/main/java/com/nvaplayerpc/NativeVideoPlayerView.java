@@ -1,4 +1,4 @@
-package com.signageplayertv;
+package com.nvaplayerpc;
 
 import android.content.Context;
 import android.graphics.Color;

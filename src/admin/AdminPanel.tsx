@@ -19,6 +19,8 @@ import {
   verifyCMS,
 } from "../services/serverService";
 
+const TV_INPUT_FOCUS_DELAY_MS = 400;
+
 export default function AdminPanel({ visible, onClose }: any) {
   const slide = useRef(new Animated.Value(400)).current;
   const [server, updateServer] = useState("");
@@ -68,7 +70,7 @@ export default function AdminPanel({ visible, onClose }: any) {
     setFocusTarget("input");
     const timer = setTimeout(() => {
       inputRef.current?.focus();
-    }, 200);
+    }, TV_INPUT_FOCUS_DELAY_MS);
     return () => clearTimeout(timer);
   }, [visible]);
 

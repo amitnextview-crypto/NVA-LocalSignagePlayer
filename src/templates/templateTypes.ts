@@ -2,7 +2,8 @@ export type TemplateLayout =
   | "schedule-board"
   | "list-focus"
   | "metric-cards"
-  | "price-board";
+  | "price-board"
+  | "welcome-guest";
 
 export interface TemplateRow {
   label: string;
@@ -11,6 +12,7 @@ export interface TemplateRow {
   status?: string;
   price?: string;
   imageUrl?: string;
+  hidden?: boolean;
 }
 
 export interface TemplateInstance {
@@ -31,12 +33,39 @@ export interface TemplateInstance {
   subtitleScale?: number;
   badgeScale?: number;
   logoScale?: number;
+  titleColor?: string;
+  titleBgColor?: string;
+  subtitleColor?: string;
+  subtitleBgColor?: string;
+  badgeColor?: string;
+  badgeBgColor?: string;
+  rowTitleColor?: string;
+  rowMetaColor?: string;
+  rowValueColor?: string;
+  rowStatusColor?: string;
+  rowBoxBgColor?: string;
+  rowBoxBorderColor?: string;
+  showHeader?: boolean;
+  showTitle?: boolean;
+  showSubtitle?: boolean;
+  showLogo?: boolean;
+  showBadge?: boolean;
+  showRows?: boolean;
+  showRowImages?: boolean;
+  showFeatureImage?: boolean;
+  showBackgroundImage?: boolean;
   rowTextScale?: number;
   rowMetaScale?: number;
   rowValueScale?: number;
   rowImageScale?: number;
   rowGapScale?: number;
   rowBoxScale?: number;
+  rowAnchor?: "top" | "middle" | "bottom";
+  rowPaddingScale?: number;
+  rowRadiusScale?: number;
+  headerSpacingScale?: number;
+  bodyTopScale?: number;
+  canvasPaddingScale?: number;
   backgroundZoom?: number;
   logoUrl?: string;
   imageUrl?: string;

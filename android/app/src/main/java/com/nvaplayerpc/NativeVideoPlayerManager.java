@@ -1,4 +1,4 @@
-package com.signageplayertv;
+package com.nvaplayerpc;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;

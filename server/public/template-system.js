@@ -3,6 +3,7 @@
   const TEMPLATE_LIBRARY_OVERRIDES_KEY = "template_library_overrides_v1";
   const TEMPLATE_ROW_GAP_MAX = 12;
   const TEMPLATE_ROW_BOX_MAX = 7.6;
+  const TEMPLATE_ROW_ANCHORS = ["top", "middle", "bottom"];
   const TEMPLATE_FONT_OPTIONS = [
     {
       value: "system",
@@ -684,6 +685,19 @@
             { label: "Meeting Rooms Busy", value: "5", meta: "Now", status: "In Use" },
           ],
         },
+        {
+          slug: "welcoming-guest",
+          name: "Welcoming Guest",
+          layout: "welcome-guest",
+          title: "Welcoming Our Esteemed Guest",
+          subtitle: "Create a premium lobby poster with full guest image, host details, and reception messaging.",
+          badgeText: "Guest Of Honour",
+          rows: [
+            { label: "Guest Name", value: "Dr. A. K. Sharma", meta: "Chief Keynote Speaker", status: "Today" },
+            { label: "Hosted By", value: "NVA Group", meta: "Corporate Leadership Summit", status: "Main Event" },
+            { label: "Venue", value: "Grand Reception Hall", meta: "10:30 AM Onwards", status: "Welcome" },
+          ],
+        },
       ],
     },
     {
@@ -842,6 +856,28 @@
     return Math.max(min, Math.min(max, value));
   }
 
+  function normalizeRowAnchor(value) {
+    const anchor = String(value || "top").trim().toLowerCase();
+    return TEMPLATE_ROW_ANCHORS.includes(anchor) ? anchor : "top";
+  }
+
+  function resolveRowJustify(anchor) {
+    if (anchor === "bottom") return "flex-end";
+    if (anchor === "middle") return "center";
+    return "flex-start";
+  }
+
+  function resolveRowAlign(anchor) {
+    if (anchor === "bottom") return "end";
+    if (anchor === "middle") return "center";
+    return "start";
+  }
+
+  function resolveColor(value, fallback) {
+    const raw = String(value || "").trim();
+    return raw || fallback;
+  }
+
   function getPreviewMetrics(instance, options) {
     const width = Math.max(120, Number(options?.width || (options?.compact ? 280 : 480)));
     const height = Math.max(120, Number(options?.height || (options?.compact ? 180 : 320)));
@@ -859,11 +895,22 @@
     const rowTextBoost = Number(instance?.rowTextScale || 1);
     const rowMetaBoost = Number(instance?.rowMetaScale || 1);
     const rowValueBoost = Number(instance?.rowValueScale || 1);
+    const rowPaddingBoost = Number(instance?.rowPaddingScale || 1);
+    const rowRadiusBoost = Number(instance?.rowRadiusScale || 1);
+    const headerSpacingBoost = Number(instance?.headerSpacingScale || 1);
+    const bodyTopBoost = Number(instance?.bodyTopScale || 1);
+    const canvasPaddingBoost = Number(instance?.canvasPaddingScale || 1);
+    const rowAnchor = normalizeRowAnchor(instance?.rowAnchor);
     const gapBoost = Number(instance?.rowGapScale || 1);
     const bodyGap = Math.round((compact ? (crowded ? 8 : 9) : crowded ? 10 : 12) * gapBoost);
     const rowBoxBoost = Number(instance?.rowBoxScale || 1);
-    const rowPadV = Math.round((compact ? 7 : 9) * Math.min(2.8, 0.92 + rowBoxBoost * 0.34 + rowMetaBoost * 0.08));
-    const rowPadH = compact ? 10 : 12;
+    const rowPadV = Math.round((compact ? 7 : 9) * Math.min(2.8, 0.92 + rowBoxBoost * 0.34 + rowMetaBoost * 0.08) * rowPaddingBoost);
+    const rowPadH = Math.round((compact ? 10 : 12) * rowPaddingBoost);
+    const rowRadius = Math.round((compact ? 14 : 16) * rowRadiusBoost);
+    const metricRadius = Math.round((compact ? 16 : 18) * rowRadiusBoost);
+    const guestCardRadius = Math.round((compact ? 16 : 18) * rowRadiusBoost);
+    const guestHeroRadius = Math.round((compact ? 18 : 22) * rowRadiusBoost);
+    const shellPad = Math.round((compact ? 10 : 14) * canvasPaddingBoost);
     const logoSize = clamp((compact ? (crowded ? 38 : 44) : spacious ? (crowded ? 60 : 74) : 54) * logoBoost, 26, 120);
     const rowImageSize = clamp((compact ? (crowded ? 42 : 48) : spacious ? (crowded ? 64 : 82) : 56) * rowImageBoost, 28, 132);
     const sideWidth = clamp(
@@ -874,9 +921,9 @@
     const titleSize = clamp((compact ? 16 : spacious ? 26 : 20) * scaleBase * titleBoost, 12, 52);
     const subtitleSize = clamp((compact ? 9 : spacious ? 13 : 11) * scaleBase * subtitleBoost, 8, 24);
     const badgeSize = clamp((compact ? 8 : 10) * scaleBase * badgeBoost, 7, 22);
-    const headerGap = compact ? 8 : 10;
-    const headerBottom = compact ? 8 : 12;
-    const bodyTop = compact ? 6 : 10;
+    const headerGap = Math.round((compact ? 8 : 10) * headerSpacingBoost);
+    const headerBottom = Math.round((compact ? 8 : 12) * headerSpacingBoost);
+    const bodyTop = Math.round((compact ? 6 : 10) * bodyTopBoost);
     const metricCols = width < 280 || height > width * 1.15 ? 1 : 2;
     const metricRowsPerColumn = Math.max(1, Math.ceil(rowCount / metricCols));
     const bodyHeight = Math.max(120, height - logoSize - titleSize * 2.2 - subtitleSize * 1.6 - headerBottom - bodyTop);
@@ -910,6 +957,11 @@
         `--tpl-body-gap:${bodyGap}px`,
         `--tpl-row-pad-v:${rowPadV}px`,
         `--tpl-row-pad-h:${rowPadH}px`,
+        `--tpl-row-radius:${rowRadius}px`,
+        `--tpl-metric-radius:${metricRadius}px`,
+        `--tpl-guest-card-radius:${guestCardRadius}px`,
+        `--tpl-guest-hero-radius:${guestHeroRadius}px`,
+        `--tpl-shell-pad:${shellPad}px`,
         `--tpl-row-height:${rowHeight}px`,
         `--tpl-side-width:${sideWidth}px`,
         `--tpl-row-image-size:${rowImageSize}px`,
@@ -922,6 +974,8 @@
         `--tpl-row-meta-line:${Math.round(rowMetaSize * 1.28)}px`,
         `--tpl-row-value-line:${Math.round(rowValueSize * 1.08)}px`,
         `--tpl-bg-size:${clamp(Number(instance?.backgroundZoom || 1) * 100, 80, 180)}%`,
+        `--tpl-body-justify:${resolveRowJustify(rowAnchor)}`,
+        `--tpl-body-align:${resolveRowAlign(rowAnchor)}`,
       ],
     };
   }
@@ -970,6 +1024,7 @@
         layout: entry.layout,
         order: index,
         defaults: {
+          category: group.category,
           titleText: entry.title,
           subtitleText: entry.subtitle,
           badgeText: entry.badgeText,
@@ -982,12 +1037,39 @@
           subtitleScale: 1,
           badgeScale: 1,
           logoScale: 1,
+          titleColor: "",
+          titleBgColor: "",
+          subtitleColor: "",
+          subtitleBgColor: "",
+          badgeColor: "",
+          badgeBgColor: "",
+          rowTitleColor: "",
+          rowMetaColor: "",
+          rowValueColor: "",
+          rowStatusColor: "",
+          rowBoxBgColor: "",
+          rowBoxBorderColor: "",
+          showHeader: entry.layout === "welcome-guest" ? false : true,
+          showTitle: true,
+          showSubtitle: true,
+          showLogo: true,
+          showBadge: true,
+          showRows: true,
+          showRowImages: true,
+          showFeatureImage: true,
+          showBackgroundImage: true,
           rowTextScale: 1,
           rowMetaScale: 1,
           rowValueScale: 1,
           rowImageScale: 1,
           rowGapScale: 1,
           rowBoxScale: 1,
+          rowAnchor: "top",
+          rowPaddingScale: 1,
+          rowRadiusScale: 1,
+          headerSpacingScale: 1,
+          bodyTopScale: 1,
+          canvasPaddingScale: 1,
           backgroundZoom: 1,
           logoUrl: "",
           imageUrl: "",
@@ -997,6 +1079,8 @@
             meta: row.meta || "",
             status: row.status || "",
             price: row.price || "",
+            imageUrl: row.imageUrl || "",
+            hidden: row.hidden === true,
           })),
         },
       };
@@ -1032,6 +1116,7 @@
       status: String(row?.status || ""),
       price: String(row?.price || ""),
       imageUrl: String(row?.imageUrl || ""),
+      hidden: row?.hidden === true,
     };
   }
 
@@ -1045,12 +1130,27 @@
     const rows = Array.isArray(overrides?.rows) ? overrides.rows : merged.rows;
     return {
       templateId: base.id,
-      category: base.category,
+      category: String(merged.category || base.category || ""),
       name: base.name,
       layout: base.layout,
       titleText: String(merged.titleText || base.defaults.titleText || ""),
       subtitleText: String(merged.subtitleText || base.defaults.subtitleText || ""),
       badgeText: String(merged.badgeText || ""),
+      titleColor: String(merged.titleColor || ""),
+      titleBgColor: String(merged.titleBgColor || ""),
+      subtitleColor: String(merged.subtitleColor || ""),
+      subtitleBgColor: String(merged.subtitleBgColor || ""),
+      badgeColor: String(merged.badgeColor || ""),
+      badgeBgColor: String(merged.badgeBgColor || ""),
+      rowTitleColor: String(merged.rowTitleColor || ""),
+      rowMetaColor: String(merged.rowMetaColor || ""),
+      rowValueColor: String(merged.rowValueColor || ""),
+      rowStatusColor: String(merged.rowStatusColor || ""),
+      rowBoxBgColor: String(merged.rowBoxBgColor || ""),
+      rowBoxBorderColor: String(merged.rowBoxBorderColor || ""),
+      showHeader: merged.showHeader !== false,
+      showTitle: merged.showTitle !== false,
+      showSubtitle: merged.showSubtitle !== false,
       primaryColor: String(merged.primaryColor || base.defaults.primaryColor || "#2563eb"),
       secondaryColor: String(merged.secondaryColor || "#f4f7fb"),
       backgroundColor: String(merged.backgroundColor || "#08121b"),
@@ -1061,12 +1161,24 @@
       subtitleScale: Math.max(0.7, Math.min(2.4, Number(merged.subtitleScale || 1))),
       badgeScale: Math.max(0.7, Math.min(2.4, Number(merged.badgeScale || 1))),
       logoScale: Math.max(0.7, Math.min(2.4, Number(merged.logoScale || 1))),
+      showLogo: merged.showLogo !== false,
+      showBadge: merged.showBadge !== false,
+      showRows: merged.showRows !== false,
+      showRowImages: merged.showRowImages !== false,
+      showFeatureImage: merged.showFeatureImage !== false,
+      showBackgroundImage: merged.showBackgroundImage !== false,
       rowTextScale: Math.max(0.7, Math.min(2.6, Number(merged.rowTextScale || 1))),
       rowMetaScale: Math.max(0.7, Math.min(2.6, Number(merged.rowMetaScale || 1))),
       rowValueScale: Math.max(0.7, Math.min(2.8, Number(merged.rowValueScale || 1))),
       rowImageScale: Math.max(0.7, Math.min(2.4, Number(merged.rowImageScale || 1))),
       rowGapScale: Math.max(0.7, Math.min(TEMPLATE_ROW_GAP_MAX, Number(merged.rowGapScale || 1))),
       rowBoxScale: Math.max(0.7, Math.min(TEMPLATE_ROW_BOX_MAX, Number(merged.rowBoxScale || 1))),
+      rowAnchor: normalizeRowAnchor(merged.rowAnchor),
+      rowPaddingScale: Math.max(0.7, Math.min(2.6, Number(merged.rowPaddingScale || 1))),
+      rowRadiusScale: Math.max(0.7, Math.min(2.8, Number(merged.rowRadiusScale || 1))),
+      headerSpacingScale: Math.max(0.6, Math.min(2.5, Number(merged.headerSpacingScale || 1))),
+      bodyTopScale: Math.max(0.5, Math.min(3, Number(merged.bodyTopScale || 1))),
+      canvasPaddingScale: Math.max(0.7, Math.min(2.4, Number(merged.canvasPaddingScale || 1))),
       backgroundZoom: Math.max(0.8, Math.min(1.8, Number(merged.backgroundZoom || 1))),
       logoUrl: String(merged.logoUrl || ""),
       imageUrl: String(merged.imageUrl || ""),
@@ -1328,9 +1440,31 @@
     if (!templateId || !base) return;
 
     const nextDefaults = {
+      category: String(instance?.category || base.category || ""),
       titleText: String(instance?.titleText || base.defaults.titleText || ""),
       subtitleText: String(instance?.subtitleText || base.defaults.subtitleText || ""),
       badgeText: String(instance?.badgeText || ""),
+      titleColor: String(instance?.titleColor || ""),
+      titleBgColor: String(instance?.titleBgColor || ""),
+      subtitleColor: String(instance?.subtitleColor || ""),
+      subtitleBgColor: String(instance?.subtitleBgColor || ""),
+      badgeColor: String(instance?.badgeColor || ""),
+      badgeBgColor: String(instance?.badgeBgColor || ""),
+      rowTitleColor: String(instance?.rowTitleColor || ""),
+      rowMetaColor: String(instance?.rowMetaColor || ""),
+      rowValueColor: String(instance?.rowValueColor || ""),
+      rowStatusColor: String(instance?.rowStatusColor || ""),
+      rowBoxBgColor: String(instance?.rowBoxBgColor || ""),
+      rowBoxBorderColor: String(instance?.rowBoxBorderColor || ""),
+      showHeader: instance?.showHeader !== false,
+      showTitle: instance?.showTitle !== false,
+      showSubtitle: instance?.showSubtitle !== false,
+      showLogo: instance?.showLogo !== false,
+      showBadge: instance?.showBadge !== false,
+      showRows: instance?.showRows !== false,
+      showRowImages: instance?.showRowImages !== false,
+      showFeatureImage: instance?.showFeatureImage !== false,
+      showBackgroundImage: instance?.showBackgroundImage !== false,
       primaryColor: String(instance?.primaryColor || base.defaults.primaryColor || "#2563eb"),
       secondaryColor: String(instance?.secondaryColor || base.defaults.secondaryColor || "#f4f7fb"),
       backgroundColor: String(instance?.backgroundColor || base.defaults.backgroundColor || "#08121b"),
@@ -1341,15 +1475,27 @@
       subtitleScale: Math.max(0.7, Math.min(2.4, Number(instance?.subtitleScale || 1))),
       badgeScale: Math.max(0.7, Math.min(2.4, Number(instance?.badgeScale || 1))),
       logoScale: Math.max(0.7, Math.min(2.4, Number(instance?.logoScale || 1))),
+      showLogo: instance?.showLogo !== false,
+      showBadge: instance?.showBadge !== false,
+      showRows: instance?.showRows !== false,
+      showRowImages: instance?.showRowImages !== false,
+      showFeatureImage: instance?.showFeatureImage !== false,
+      showBackgroundImage: instance?.showBackgroundImage !== false,
       rowTextScale: Math.max(0.7, Math.min(2.6, Number(instance?.rowTextScale || 1))),
       rowMetaScale: Math.max(0.7, Math.min(2.6, Number(instance?.rowMetaScale || 1))),
       rowValueScale: Math.max(0.7, Math.min(2.8, Number(instance?.rowValueScale || 1))),
       rowImageScale: Math.max(0.7, Math.min(2.4, Number(instance?.rowImageScale || 1))),
       rowGapScale: Math.max(0.7, Math.min(TEMPLATE_ROW_GAP_MAX, Number(instance?.rowGapScale || 1))),
       rowBoxScale: Math.max(0.7, Math.min(TEMPLATE_ROW_BOX_MAX, Number(instance?.rowBoxScale || 1))),
+      rowAnchor: normalizeRowAnchor(instance?.rowAnchor),
+      rowPaddingScale: Math.max(0.7, Math.min(2.6, Number(instance?.rowPaddingScale || 1))),
+      rowRadiusScale: Math.max(0.7, Math.min(2.8, Number(instance?.rowRadiusScale || 1))),
+      headerSpacingScale: Math.max(0.6, Math.min(2.5, Number(instance?.headerSpacingScale || 1))),
+      bodyTopScale: Math.max(0.5, Math.min(3, Number(instance?.bodyTopScale || 1))),
+      canvasPaddingScale: Math.max(0.7, Math.min(2.4, Number(instance?.canvasPaddingScale || 1))),
       backgroundZoom: Math.max(0.8, Math.min(1.8, Number(instance?.backgroundZoom || 1))),
-      logoUrl: String(instance?.logoUrl || instance?.imageUrl || ""),
-      imageUrl: String(instance?.imageUrl || instance?.logoUrl || ""),
+      logoUrl: String(instance?.logoUrl || ""),
+      imageUrl: String(instance?.imageUrl || ""),
       rows: ensureRows(instance).rows.slice(0, 5).map(normalizeRow),
     };
 
@@ -1377,14 +1523,22 @@
             <strong>Row ${index + 1}</strong>
             <button class="btn warning template-icon-btn template-row-remove-btn" type="button" title="Remove row" aria-label="Remove row" onclick="window.TemplateSystem.removeEditorRow(${index})">X</button>
           </div>
+          <div class="template-compact-checks">
+            <label class="template-check-chip"><input data-row="${index}" data-field="hidden" type="checkbox" ${row.hidden ? "checked" : ""} /> Hide Row</label>
+          </div>
           <div class="template-row-grid">
             <input data-row="${index}" data-field="label" value="${escapeHtml(row.label)}" placeholder="Label" />
             <input data-row="${index}" data-field="value" value="${escapeHtml(row.value)}" placeholder="Value / time" />
             <input data-row="${index}" data-field="price" value="${escapeHtml(row.price)}" placeholder="Price" />
             <input data-row="${index}" data-field="status" value="${escapeHtml(row.status)}" placeholder="Status" />
             <input data-row="${index}" data-field="meta" value="${escapeHtml(row.meta)}" placeholder="Meta / detail" />
-            <input data-row="${index}" data-field="imageUrl" value="${escapeHtml(row.imageUrl || "")}" placeholder="Row image URL" />
-            <input class="template-row-image-file" data-row-image-file="${index}" type="file" accept="image/png,image/jpeg,image/webp" />
+            <div class="template-inline-stack">
+              <input data-row="${index}" data-field="imageUrl" value="${escapeHtml(row.imageUrl || "")}" placeholder="Row image URL" />
+              <div class="template-inline-actions">
+                <input class="template-row-image-file template-file-inline" data-row-image-file="${index}" type="file" accept="image/png,image/jpeg,image/webp" />
+                <button class="btn warning template-tiny-btn" type="button" onclick="window.TemplateSystem.clearRowField(${index}, 'imageUrl')">Hide</button>
+              </div>
+            </div>
           </div>
         </div>
       `)
@@ -1400,7 +1554,7 @@
         <div>
           <div class="template-modal-kicker">${escapeHtml(instance.category)}</div>
           <h3>${escapeHtml(instance.name)}</h3>
-          <p>Small, focused customization only. Ideal for fast signage updates.</p>
+          <p>Fine-tune layout, spacing, row positioning, and styling with live preview control.</p>
         </div>
         <div class="template-head-actions">
           <button class="btn primary" type="button" onclick="window.TemplateSystem.backToPicker()">Back</button>
@@ -1409,13 +1563,60 @@
       </div>
       <div class="template-editor-layout">
         <div class="template-editor-form">
+          <div class="template-editor-section">
+            <div class="template-editor-section-title">Visibility</div>
+            <div class="template-compact-checks">
+              <label class="template-check-chip"><input id="templateEditShowHeader" type="checkbox" ${instance.showHeader !== false ? "checked" : ""} /> Header</label>
+              <label class="template-check-chip"><input id="templateEditShowTitle" type="checkbox" ${instance.showTitle !== false ? "checked" : ""} /> Title</label>
+              <label class="template-check-chip"><input id="templateEditShowSubtitle" type="checkbox" ${instance.showSubtitle !== false ? "checked" : ""} /> Subtitle</label>
+              <label class="template-check-chip"><input id="templateEditShowLogo" type="checkbox" ${instance.showLogo !== false ? "checked" : ""} /> Logo</label>
+              <label class="template-check-chip"><input id="templateEditShowBadge" type="checkbox" ${instance.showBadge !== false ? "checked" : ""} /> Badge</label>
+              <label class="template-check-chip"><input id="templateEditShowRows" type="checkbox" ${instance.showRows !== false ? "checked" : ""} /> Row Boxes</label>
+              <label class="template-check-chip"><input id="templateEditShowRowImages" type="checkbox" ${instance.showRowImages !== false ? "checked" : ""} /> Row Images</label>
+              <label class="template-check-chip"><input id="templateEditShowFeatureImage" type="checkbox" ${instance.showFeatureImage !== false ? "checked" : ""} /> Poster</label>
+              <label class="template-check-chip"><input id="templateEditShowBackgroundImage" type="checkbox" ${instance.showBackgroundImage !== false ? "checked" : ""} /> Background</label>
+            </div>
+          </div>
+          <div class="template-editor-section">
+            <div class="template-editor-section-title">Content</div>
           <div class="template-editor-grid">
+            <label>Category</label>
+            <div class="template-inline-stack">
+              <input id="templateEditCategory" type="text" value="${escapeHtml(instance.category || "")}" />
+              <div class="template-inline-actions">
+                <button class="btn warning template-tiny-btn" type="button" onclick="window.TemplateSystem.clearEditorField('templateEditCategory')">Clear</button>
+              </div>
+            </div>
             <label>Title</label>
-            <input id="templateEditTitle" type="text" value="${escapeHtml(instance.titleText)}" />
+            <div class="template-inline-stack">
+              <input id="templateEditTitle" type="text" value="${escapeHtml(instance.titleText)}" />
+              <div class="template-inline-actions">
+                <input id="templateEditTitleColor" type="color" value="${escapeHtml(instance.titleColor || instance.primaryColor)}" title="Title font color" />
+                <input id="templateEditTitleBgColor" type="color" value="${escapeHtml(instance.titleBgColor || instance.backgroundColor)}" title="Title background color" />
+                <button class="btn warning template-tiny-btn" type="button" onclick="window.TemplateSystem.toggleEditorCheckbox('templateEditShowTitle', false)">Hide</button>
+                <button class="btn warning template-tiny-btn" type="button" onclick="window.TemplateSystem.clearEditorField('templateEditTitle')">Clear</button>
+              </div>
+            </div>
             <label>Subtitle</label>
-            <input id="templateEditSubtitle" type="text" value="${escapeHtml(instance.subtitleText)}" />
+            <div class="template-inline-stack">
+              <input id="templateEditSubtitle" type="text" value="${escapeHtml(instance.subtitleText)}" />
+              <div class="template-inline-actions">
+                <input id="templateEditSubtitleColor" type="color" value="${escapeHtml(instance.subtitleColor || instance.secondaryColor)}" title="Subtitle font color" />
+                <input id="templateEditSubtitleBgColor" type="color" value="${escapeHtml(instance.subtitleBgColor || instance.backgroundColor)}" title="Subtitle background color" />
+                <button class="btn warning template-tiny-btn" type="button" onclick="window.TemplateSystem.toggleEditorCheckbox('templateEditShowSubtitle', false)">Hide</button>
+                <button class="btn warning template-tiny-btn" type="button" onclick="window.TemplateSystem.clearEditorField('templateEditSubtitle')">Clear</button>
+              </div>
+            </div>
             <label>Badge</label>
-            <input id="templateEditBadge" type="text" value="${escapeHtml(instance.badgeText)}" />
+            <div class="template-inline-stack">
+              <input id="templateEditBadge" type="text" value="${escapeHtml(instance.badgeText)}" />
+              <div class="template-inline-actions">
+                <input id="templateEditBadgeColor" type="color" value="${escapeHtml(instance.badgeColor || instance.primaryColor)}" title="Badge font color" />
+                <input id="templateEditBadgeBgColor" type="color" value="${escapeHtml(instance.badgeBgColor || instance.primaryColor)}" title="Badge background color" />
+                <button class="btn warning template-tiny-btn" type="button" onclick="window.TemplateSystem.toggleEditorCheckbox('templateEditShowBadge', false)">Hide</button>
+                <button class="btn warning template-tiny-btn" type="button" onclick="window.TemplateSystem.clearEditorField('templateEditBadge')">Clear</button>
+              </div>
+            </div>
             <label>Primary Color</label>
             <input id="templateEditPrimary" type="color" value="${escapeHtml(instance.primaryColor)}" />
             <label>Secondary Color</label>
@@ -1431,9 +1632,22 @@
               `).join("")}
             </select>
             <label>Background Image URL</label>
-            <input id="templateEditBackgroundImage" type="text" value="${escapeHtml(instance.backgroundImageUrl || "")}" placeholder="https://... or data:image/..." />
+            <div class="template-inline-stack">
+              <input id="templateEditBackgroundImage" type="text" value="${escapeHtml(instance.backgroundImageUrl || "")}" placeholder="https://... or data:image/..." />
+              <div class="template-inline-actions">
+                <input id="templateEditBackgroundFile" class="template-file-inline" type="file" accept="image/png,image/jpeg,image/webp" />
+                <button class="btn warning template-tiny-btn" type="button" onclick="window.TemplateSystem.toggleEditorCheckbox('templateEditShowBackgroundImage', false)">Hide</button>
+                <button class="btn warning template-tiny-btn" type="button" onclick="window.TemplateSystem.clearEditorField('templateEditBackgroundImage')">Clear</button>
+              </div>
+            </div>
             <label>Base Font</label>
             <input id="templateEditScale" type="range" min="0.7" max="2" step="0.05" value="${escapeHtml(instance.fontScale)}" />
+            <label>Canvas Padding</label>
+            <input id="templateEditCanvasPaddingScale" type="range" min="0.7" max="2.4" step="0.05" value="${escapeHtml(instance.canvasPaddingScale || 1)}" />
+            <label>Header Spacing</label>
+            <input id="templateEditHeaderSpacingScale" type="range" min="0.6" max="2.5" step="0.05" value="${escapeHtml(instance.headerSpacingScale || 1)}" />
+            <label>Body Start Gap</label>
+            <input id="templateEditBodyTopScale" type="range" min="0.5" max="3" step="0.05" value="${escapeHtml(instance.bodyTopScale || 1)}" />
             <label>Title Size</label>
             <input id="templateEditTitleScale" type="range" min="0.7" max="2.4" step="0.05" value="${escapeHtml(instance.titleScale || 1)}" />
             <label>Subtitle Size</label>
@@ -1443,26 +1657,70 @@
             <label>Logo Size</label>
             <input id="templateEditLogoScale" type="range" min="0.7" max="2.4" step="0.05" value="${escapeHtml(instance.logoScale || 1)}" />
             <label>Row Title Size</label>
-            <input id="templateEditRowTextScale" type="range" min="0.7" max="2.6" step="0.05" value="${escapeHtml(instance.rowTextScale || 1)}" />
+            <div class="template-inline-stack">
+              <input id="templateEditRowTextScale" type="range" min="0.7" max="2.6" step="0.05" value="${escapeHtml(instance.rowTextScale || 1)}" />
+              <div class="template-inline-actions">
+                <input id="templateEditRowTitleColor" type="color" value="${escapeHtml(instance.rowTitleColor || instance.secondaryColor)}" title="Row title color" />
+              </div>
+            </div>
             <label>Row Meta Size</label>
-            <input id="templateEditRowMetaScale" type="range" min="0.7" max="2.6" step="0.05" value="${escapeHtml(instance.rowMetaScale || 1)}" />
+            <div class="template-inline-stack">
+              <input id="templateEditRowMetaScale" type="range" min="0.7" max="2.6" step="0.05" value="${escapeHtml(instance.rowMetaScale || 1)}" />
+              <div class="template-inline-actions">
+                <input id="templateEditRowMetaColor" type="color" value="${escapeHtml(instance.rowMetaColor || instance.secondaryColor)}" title="Row meta color" />
+                <input id="templateEditRowStatusColor" type="color" value="${escapeHtml(instance.rowStatusColor || instance.primaryColor)}" title="Row status color" />
+              </div>
+            </div>
             <label>Row Value Size</label>
-            <input id="templateEditRowValueScale" type="range" min="0.7" max="2.8" step="0.05" value="${escapeHtml(instance.rowValueScale || 1)}" />
+            <div class="template-inline-stack">
+              <input id="templateEditRowValueScale" type="range" min="0.7" max="2.8" step="0.05" value="${escapeHtml(instance.rowValueScale || 1)}" />
+              <div class="template-inline-actions">
+                <input id="templateEditRowValueColor" type="color" value="${escapeHtml(instance.rowValueColor || instance.secondaryColor)}" title="Row value color" />
+              </div>
+            </div>
             <label>Row Image Size</label>
             <input id="templateEditRowImageScale" type="range" min="0.7" max="2.4" step="0.05" value="${escapeHtml(instance.rowImageScale || 1)}" />
             <label>Row Gap</label>
             <input id="templateEditRowGapScale" type="range" min="0.7" max="${TEMPLATE_ROW_GAP_MAX}" step="0.05" value="${escapeHtml(instance.rowGapScale || 1)}" />
             <label>Row Box Size</label>
-            <input id="templateEditRowBoxScale" type="range" min="0.7" max="${TEMPLATE_ROW_BOX_MAX}" step="0.05" value="${escapeHtml(instance.rowBoxScale || 1)}" />
+            <div class="template-inline-stack">
+              <input id="templateEditRowBoxScale" type="range" min="0.7" max="${TEMPLATE_ROW_BOX_MAX}" step="0.05" value="${escapeHtml(instance.rowBoxScale || 1)}" />
+              <div class="template-inline-actions">
+                <input id="templateEditRowBoxBgColor" type="color" value="${escapeHtml(instance.rowBoxBgColor || instance.primaryColor)}" title="Row box background color" />
+                <input id="templateEditRowBoxBorderColor" type="color" value="${escapeHtml(instance.rowBoxBorderColor || instance.primaryColor)}" title="Row box border color" />
+              </div>
+            </div>
+            <label>Row Start Position</label>
+            <select id="templateEditRowAnchor">
+              <option value="top" ${normalizeRowAnchor(instance.rowAnchor) === "top" ? "selected" : ""}>Top</option>
+              <option value="middle" ${normalizeRowAnchor(instance.rowAnchor) === "middle" ? "selected" : ""}>Middle</option>
+              <option value="bottom" ${normalizeRowAnchor(instance.rowAnchor) === "bottom" ? "selected" : ""}>Bottom</option>
+            </select>
+            <label>Row Padding</label>
+            <input id="templateEditRowPaddingScale" type="range" min="0.7" max="2.6" step="0.05" value="${escapeHtml(instance.rowPaddingScale || 1)}" />
+            <label>Row Corner Radius</label>
+            <input id="templateEditRowRadiusScale" type="range" min="0.7" max="2.8" step="0.05" value="${escapeHtml(instance.rowRadiusScale || 1)}" />
             <label>BG Zoom</label>
             <input id="templateEditBackgroundZoom" type="range" min="0.8" max="1.8" step="0.05" value="${escapeHtml(instance.backgroundZoom || 1)}" />
-            <label>Logo / Image URL</label>
-            <input id="templateEditLogo" type="text" value="${escapeHtml(instance.logoUrl || instance.imageUrl)}" placeholder="https://... or data:image/..." />
+            <label>Logo URL</label>
+            <div class="template-inline-stack">
+              <input id="templateEditLogo" type="text" value="${escapeHtml(instance.logoUrl || "")}" placeholder="https://... or data:image/..." />
+              <div class="template-inline-actions">
+                <input id="templateEditLogoFile" class="template-file-inline" type="file" accept="image/png,image/jpeg,image/webp" />
+                <button class="btn warning template-tiny-btn" type="button" onclick="window.TemplateSystem.toggleEditorCheckbox('templateEditShowLogo', false)">Hide</button>
+                <button class="btn warning template-tiny-btn" type="button" onclick="window.TemplateSystem.clearEditorField('templateEditLogo')">Clear</button>
+              </div>
+            </div>
+            <label>Poster / Feature Image URL</label>
+            <div class="template-inline-stack">
+              <input id="templateEditFeatureImage" type="text" value="${escapeHtml(instance.imageUrl || "")}" placeholder="https://... or data:image/..." />
+              <div class="template-inline-actions">
+                <input id="templateEditFeatureImageFile" class="template-file-inline" type="file" accept="image/png,image/jpeg,image/webp" />
+                <button class="btn warning template-tiny-btn" type="button" onclick="window.TemplateSystem.toggleEditorCheckbox('templateEditShowFeatureImage', false)">Hide</button>
+                <button class="btn warning template-tiny-btn" type="button" onclick="window.TemplateSystem.clearEditorField('templateEditFeatureImage')">Clear</button>
+              </div>
+            </div>
           </div>
-          <div class="template-upload-inline">
-            <input id="templateEditLogoFile" type="file" accept="image/png,image/jpeg,image/webp" />
-            <input id="templateEditBackgroundFile" type="file" accept="image/png,image/jpeg,image/webp" />
-            <span>Optional uploads convert the image into a small embedded data URL for offline use.</span>
           </div>
           <div class="template-editor-actions">
             <button class="btn primary" type="button" onclick="window.TemplateSystem.saveEditor()">Save Template</button>
@@ -1494,21 +1752,46 @@
     const rows = Array.from(document.querySelectorAll("#templateRowsEditor [data-row]")).reduce((acc, input) => {
       const rowIndex = Number(input.getAttribute("data-row") || 0);
       const field = String(input.getAttribute("data-field") || "");
-      if (!acc[rowIndex]) acc[rowIndex] = { label: "", value: "", meta: "", status: "", price: "", imageUrl: "" };
-      acc[rowIndex][field] = input.value || "";
+      if (!acc[rowIndex]) acc[rowIndex] = { label: "", value: "", meta: "", status: "", price: "", imageUrl: "", hidden: false };
+      acc[rowIndex][field] = input.type === "checkbox" ? !!input.checked : input.value || "";
       return acc;
     }, []);
     return ensureRows({
       ...current,
+      category: document.getElementById("templateEditCategory")?.value || "",
       titleText: document.getElementById("templateEditTitle")?.value || "",
       subtitleText: document.getElementById("templateEditSubtitle")?.value || "",
       badgeText: document.getElementById("templateEditBadge")?.value || "",
+      titleColor: document.getElementById("templateEditTitleColor")?.value || "",
+      titleBgColor: document.getElementById("templateEditTitleBgColor")?.value || "",
+      subtitleColor: document.getElementById("templateEditSubtitleColor")?.value || "",
+      subtitleBgColor: document.getElementById("templateEditSubtitleBgColor")?.value || "",
+      badgeColor: document.getElementById("templateEditBadgeColor")?.value || "",
+      badgeBgColor: document.getElementById("templateEditBadgeBgColor")?.value || "",
+      rowTitleColor: document.getElementById("templateEditRowTitleColor")?.value || "",
+      rowMetaColor: document.getElementById("templateEditRowMetaColor")?.value || "",
+      rowValueColor: document.getElementById("templateEditRowValueColor")?.value || "",
+      rowStatusColor: document.getElementById("templateEditRowStatusColor")?.value || "",
+      rowBoxBgColor: document.getElementById("templateEditRowBoxBgColor")?.value || "",
+      rowBoxBorderColor: document.getElementById("templateEditRowBoxBorderColor")?.value || "",
+      showHeader: !!document.getElementById("templateEditShowHeader")?.checked,
+      showTitle: !!document.getElementById("templateEditShowTitle")?.checked,
+      showSubtitle: !!document.getElementById("templateEditShowSubtitle")?.checked,
+      showLogo: !!document.getElementById("templateEditShowLogo")?.checked,
+      showBadge: !!document.getElementById("templateEditShowBadge")?.checked,
+      showRows: !!document.getElementById("templateEditShowRows")?.checked,
+      showRowImages: !!document.getElementById("templateEditShowRowImages")?.checked,
+      showFeatureImage: !!document.getElementById("templateEditShowFeatureImage")?.checked,
+      showBackgroundImage: !!document.getElementById("templateEditShowBackgroundImage")?.checked,
       primaryColor: document.getElementById("templateEditPrimary")?.value || current.primaryColor,
       secondaryColor: document.getElementById("templateEditSecondary")?.value || current.secondaryColor,
       backgroundColor: document.getElementById("templateEditBackground")?.value || current.backgroundColor,
       fontFamily: document.getElementById("templateEditFontFamily")?.value || current.fontFamily || "system",
       backgroundImageUrl: document.getElementById("templateEditBackgroundImage")?.value || "",
       fontScale: Number(document.getElementById("templateEditScale")?.value || current.fontScale || 1),
+      canvasPaddingScale: Number(document.getElementById("templateEditCanvasPaddingScale")?.value || current.canvasPaddingScale || 1),
+      headerSpacingScale: Number(document.getElementById("templateEditHeaderSpacingScale")?.value || current.headerSpacingScale || 1),
+      bodyTopScale: Number(document.getElementById("templateEditBodyTopScale")?.value || current.bodyTopScale || 1),
       titleScale: Number(document.getElementById("templateEditTitleScale")?.value || current.titleScale || 1),
       subtitleScale: Number(document.getElementById("templateEditSubtitleScale")?.value || current.subtitleScale || 1),
       badgeScale: Number(document.getElementById("templateEditBadgeScale")?.value || current.badgeScale || 1),
@@ -1519,9 +1802,12 @@
       rowImageScale: Number(document.getElementById("templateEditRowImageScale")?.value || current.rowImageScale || 1),
       rowGapScale: Number(document.getElementById("templateEditRowGapScale")?.value || current.rowGapScale || 1),
       rowBoxScale: Number(document.getElementById("templateEditRowBoxScale")?.value || current.rowBoxScale || 1),
+      rowAnchor: document.getElementById("templateEditRowAnchor")?.value || current.rowAnchor || "top",
+      rowPaddingScale: Number(document.getElementById("templateEditRowPaddingScale")?.value || current.rowPaddingScale || 1),
+      rowRadiusScale: Number(document.getElementById("templateEditRowRadiusScale")?.value || current.rowRadiusScale || 1),
       backgroundZoom: Number(document.getElementById("templateEditBackgroundZoom")?.value || current.backgroundZoom || 1),
       logoUrl: document.getElementById("templateEditLogo")?.value || "",
-      imageUrl: document.getElementById("templateEditLogo")?.value || "",
+      imageUrl: document.getElementById("templateEditFeatureImage")?.value || "",
       rows: rows.filter(Boolean).map(normalizeRow).slice(0, 5),
     });
   }
@@ -1535,6 +1821,9 @@
     };
     Array.from(document.querySelectorAll("#templateSystemPanel input")).forEach((input) => {
       input.addEventListener("input", rerender);
+      input.addEventListener("change", rerender);
+    });
+    Array.from(document.querySelectorAll("#templateSystemPanel select")).forEach((input) => {
       input.addEventListener("change", rerender);
     });
     Array.from(document.querySelectorAll("[data-row-image-file]")).forEach((input) => {
@@ -1575,6 +1864,27 @@
           mimeType: "image/webp",
         });
         const urlInput = document.getElementById("templateEditLogo");
+        if (urlInput) urlInput.value = dataUrl;
+        rerender();
+      });
+    }
+    const featureUpload = document.getElementById("templateEditFeatureImageFile");
+    if (featureUpload) {
+      featureUpload.addEventListener("change", async (event) => {
+        const file = event?.target?.files?.[0];
+        if (!file) return;
+        if (Number(file.size || 0) > 6 * 1024 * 1024) {
+          alert("Please use a feature image under 6 MB.");
+          event.target.value = "";
+          return;
+        }
+        const dataUrl = await imageFileToDataUrl(file, {
+          maxWidth: 900,
+          maxHeight: 1400,
+          quality: 0.84,
+          mimeType: "image/webp",
+        });
+        const urlInput = document.getElementById("templateEditFeatureImage");
         if (urlInput) urlInput.value = dataUrl;
         rerender();
       });
@@ -1656,6 +1966,38 @@
     });
   }
 
+  function clearEditorField(fieldId) {
+    const input = document.getElementById(String(fieldId || ""));
+    if (!input) return;
+    if ("value" in input) {
+      input.value = "";
+    }
+    const previewTarget = document.getElementById("templateEditorPreview");
+    const instance = collectEditorInstance();
+    if (!instance || !previewTarget) return;
+    previewTarget.innerHTML = buildTemplatePreviewMarkup(instance, { compact: false });
+  }
+
+  function toggleEditorCheckbox(fieldId, checked) {
+    const input = document.getElementById(String(fieldId || ""));
+    if (!input) return;
+    input.checked = !!checked;
+    const previewTarget = document.getElementById("templateEditorPreview");
+    const instance = collectEditorInstance();
+    if (!instance || !previewTarget) return;
+    previewTarget.innerHTML = buildTemplatePreviewMarkup(instance, { compact: false });
+  }
+
+  function clearRowField(rowIndex, field) {
+    const input = document.querySelector(`[data-row="${Number(rowIndex || 0)}"][data-field="${String(field || "")}"]`);
+    if (!input) return;
+    input.value = "";
+    const previewTarget = document.getElementById("templateEditorPreview");
+    const instance = collectEditorInstance();
+    if (!instance || !previewTarget) return;
+    previewTarget.innerHTML = buildTemplatePreviewMarkup(instance, { compact: false });
+  }
+
   function addEditorRow() {
     const current = collectEditorInstance();
     if (!current) return;
@@ -1703,50 +2045,84 @@
       compact: !!options?.compact,
       width: options?.width,
       height: options?.height,
-      rowCount: Array.isArray(instance.rows) ? instance.rows.length : 0,
+      rowCount:
+        instance.showRows === false
+          ? 0
+          : Array.isArray(instance.rows)
+          ? instance.rows.filter((row) => row?.hidden !== true).length
+          : 0,
     });
     const compact = metrics.compact;
-    const rows = (instance.rows || []).slice(0, metrics.rowLimit);
+    const rows = instance.showRows === false ? [] : (instance.rows || []).filter((row) => row?.hidden !== true).slice(0, metrics.rowLimit);
+    const titleColor = resolveColor(instance.titleColor, instance.primaryColor);
+    const titleBgColor = resolveColor(instance.titleBgColor, "transparent");
+    const subtitleColor = resolveColor(instance.subtitleColor, withAlpha(instance.secondaryColor, 0.72));
+    const subtitleBgColor = resolveColor(instance.subtitleBgColor, "transparent");
+    const badgeColor = resolveColor(instance.badgeColor, instance.primaryColor);
+    const badgeBgColor = resolveColor(instance.badgeBgColor, withAlpha(instance.primaryColor, 0.24));
+    const rowTitleColor = resolveColor(instance.rowTitleColor, instance.secondaryColor);
+    const rowMetaColor = resolveColor(instance.rowMetaColor, withAlpha(instance.secondaryColor, 0.72));
+    const rowValueColor = resolveColor(instance.rowValueColor, instance.secondaryColor);
+    const rowStatusColor = resolveColor(instance.rowStatusColor, instance.primaryColor);
+    const rowBoxBgColor = resolveColor(instance.rowBoxBgColor, withAlpha(instance.primaryColor, 0.18));
+    const rowBoxBorderColor = resolveColor(instance.rowBoxBorderColor, withAlpha(instance.primaryColor, 0.34));
     const rootStyle = [
       `--tpl-primary:${instance.primaryColor}`,
       `--tpl-secondary:${instance.secondaryColor}`,
       `--tpl-bg:${instance.backgroundColor}`,
       `--tpl-font-family:${resolveTemplateWebFont(instance.fontFamily)}`,
-      `--tpl-shell-bg:${instance.backgroundImageUrl ? "transparent" : instance.backgroundColor}`,
+      `--tpl-shell-bg:${instance.backgroundImageUrl && instance.showBackgroundImage !== false ? "transparent" : instance.backgroundColor}`,
       `--tpl-overlay:${
-        instance.backgroundImageUrl
+        instance.backgroundImageUrl && instance.showBackgroundImage !== false
           ? "linear-gradient(rgba(4, 10, 16, 0.12), rgba(4, 10, 16, 0.12))"
           : "none"
       }`,
-      `--tpl-surface:${withAlpha(instance.primaryColor, 0.18)}`,
-      `--tpl-border:${withAlpha(instance.primaryColor, 0.34)}`,
-      `--tpl-muted:${withAlpha(instance.secondaryColor, 0.72)}`,
+      `--tpl-surface:${rowBoxBgColor}`,
+      `--tpl-border:${rowBoxBorderColor}`,
+      `--tpl-muted:${rowMetaColor}`,
+      `--tpl-title-color:${titleColor}`,
+      `--tpl-title-bg:${titleBgColor}`,
+      `--tpl-subtitle-color:${subtitleColor}`,
+      `--tpl-subtitle-bg:${subtitleBgColor}`,
+      `--tpl-badge-color:${badgeColor}`,
+      `--tpl-badge-bg:${badgeBgColor}`,
+      `--tpl-row-title-color:${rowTitleColor}`,
+      `--tpl-row-meta-color:${rowMetaColor}`,
+      `--tpl-row-value-color:${rowValueColor}`,
+      `--tpl-row-status-color:${rowStatusColor}`,
       `--tpl-scale:${instance.fontScale}`,
       ...metrics.vars,
-      instance.backgroundImageUrl
+      instance.backgroundImageUrl && instance.showBackgroundImage !== false
         ? `--tpl-bg-image:url("${String(instance.backgroundImageUrl).replace(/"/g, "&quot;")}")`
         : "--tpl-bg-image:none",
     ].join(";");
 
-    const logo = instance.logoUrl || instance.imageUrl
-      ? `<img class="template-render-logo" src="${escapeHtml(instance.logoUrl || instance.imageUrl)}" alt="" />`
+    const logoSource = instance.logoUrl || (instance.showFeatureImage !== false ? instance.imageUrl : "");
+    const logo = instance.showLogo === false
+      ? ""
+      : logoSource
+      ? `<img class="template-render-logo" src="${escapeHtml(logoSource)}" alt="" />`
       : `<div class="template-render-logo-placeholder">${escapeHtml(instance.category.split(" ")[0] || "TPL")}</div>`;
+    const heroImage = instance.imageUrl && instance.showFeatureImage !== false
+      ? `<div class="template-render-guest-image-wrap"><img class="template-render-guest-image" src="${escapeHtml(instance.imageUrl)}" alt="" /></div>`
+      : "";
 
-    const header = `
+    const header = instance.showHeader === false ? "" : `
       <div class="template-render-head">
-        <div class="template-render-brand">${logo}</div>
+        ${instance.showLogo === false ? "" : `<div class="template-render-brand">${logo}</div>`}
         <div class="template-render-copy">
-          <div class="template-render-title">${escapeHtml(instance.titleText)}</div>
-          <div class="template-render-subtitle">${escapeHtml(instance.subtitleText)}</div>
+          <div class="template-render-kicker">${escapeHtml(instance.category || "Featured Template")}</div>
+          ${instance.showTitle === false ? "" : `<div class="template-render-title">${escapeHtml(instance.titleText)}</div>`}
+          ${instance.subtitleText && instance.showSubtitle !== false ? `<div class="template-render-subtitle">${escapeHtml(instance.subtitleText)}</div>` : ""}
         </div>
-        ${instance.badgeText ? `<div class="template-render-badge">${escapeHtml(instance.badgeText)}</div>` : ""}
+        ${instance.badgeText && instance.showBadge !== false ? `<div class="template-render-badge">${escapeHtml(instance.badgeText)}</div>` : ""}
       </div>
     `;
 
     let body = "";
     if (instance.layout === "schedule-board") {
       body = `
-        <div class="template-render-board">
+        <div class="template-render-board template-render-body-block">
           ${rows.map((row) => `
             <div class="template-render-row">
               <div class="template-render-row-main">
@@ -1757,19 +2133,19 @@
                 <em>${escapeHtml(row.value || row.price)}</em>
                 <span>${escapeHtml(row.status)}</span>
               </div>
-              ${row.imageUrl ? `<div class="template-render-row-image-wrap"><img class="template-render-row-image" src="${escapeHtml(row.imageUrl)}" alt="" /></div>` : ""}
+              ${row.imageUrl && instance.showRowImages !== false ? `<div class="template-render-row-image-wrap"><img class="template-render-row-image" src="${escapeHtml(row.imageUrl)}" alt="" /></div>` : ""}
             </div>
           `).join("")}
         </div>
       `;
     } else if (instance.layout === "metric-cards") {
       body = `
-        <div class="template-render-metrics">
+        <div class="template-render-metrics template-render-body-block">
           ${rows.map((row) => `
             <div class="template-render-metric">
               <div class="template-render-metric-head">
                 <span>${escapeHtml(row.label)}</span>
-                ${row.imageUrl ? `<div class="template-render-metric-image-wrap"><img class="template-render-row-image" src="${escapeHtml(row.imageUrl)}" alt="" /></div>` : ""}
+                ${row.imageUrl && instance.showRowImages !== false ? `<div class="template-render-metric-image-wrap"><img class="template-render-row-image" src="${escapeHtml(row.imageUrl)}" alt="" /></div>` : ""}
               </div>
               <strong>${escapeHtml(row.value || row.price)}</strong>
               <small>${escapeHtml(row.meta || row.status)}</small>
@@ -1779,7 +2155,7 @@
       `;
     } else if (instance.layout === "price-board") {
       body = `
-        <div class="template-render-price-list">
+        <div class="template-render-price-list template-render-body-block">
           ${rows.map((row) => `
             <div class="template-render-price-item">
               <div>
@@ -1790,14 +2166,39 @@
                 <em>${escapeHtml(row.price || row.value)}</em>
                 <span>${escapeHtml(row.status)}</span>
               </div>
-              ${row.imageUrl ? `<div class="template-render-row-image-wrap"><img class="template-render-row-image" src="${escapeHtml(row.imageUrl)}" alt="" /></div>` : ""}
+              ${row.imageUrl && instance.showRowImages !== false ? `<div class="template-render-row-image-wrap"><img class="template-render-row-image" src="${escapeHtml(row.imageUrl)}" alt="" /></div>` : ""}
             </div>
           `).join("")}
         </div>
       `;
+    } else if (instance.layout === "welcome-guest") {
+      body = `
+        <div class="template-render-guest-poster">
+          <div class="template-render-guest-copy">
+            <div class="template-render-guest-hero">
+              ${instance.showTitle === false ? "" : `<strong>${escapeHtml(instance.titleText)}</strong>`}
+              ${instance.subtitleText && instance.showSubtitle !== false ? `<small>${escapeHtml(instance.subtitleText)}</small>` : ""}
+            </div>
+            ${rows.length ? `
+              <div class="template-render-guest-details-shell">
+                <div class="template-render-guest-details">
+                  ${rows.map((row) => `
+                    <div class="template-render-guest-detail">
+                      <span>${escapeHtml(row.label)}</span>
+                      <strong>${escapeHtml(row.value || row.price)}</strong>
+                      <small>${escapeHtml(row.meta || row.status)}</small>
+                    </div>
+                  `).join("")}
+                </div>
+              </div>
+            ` : ""}
+          </div>
+          ${heroImage}
+        </div>
+      `;
     } else {
       body = `
-        <div class="template-render-list">
+        <div class="template-render-list template-render-body-block">
           ${rows.map((row) => `
             <div class="template-render-list-item">
               <div class="template-render-list-main">
@@ -1807,14 +2208,14 @@
               <div class="template-render-list-side">
                 <span>${escapeHtml(row.value || row.price)}</span>
               </div>
-              ${row.imageUrl ? `<div class="template-render-row-image-wrap"><img class="template-render-row-image" src="${escapeHtml(row.imageUrl)}" alt="" /></div>` : ""}
+              ${row.imageUrl && instance.showRowImages !== false ? `<div class="template-render-row-image-wrap"><img class="template-render-row-image" src="${escapeHtml(row.imageUrl)}" alt="" /></div>` : ""}
             </div>
           `).join("")}
         </div>
       `;
     }
 
-    return `<div class="template-render ${compact ? "is-compact" : ""}" style="${rootStyle}">${header}${body}</div>`;
+    return `<div class="template-render template-render-layout-${escapeHtml(instance.layout || "list-focus")} ${compact ? "is-compact" : ""}" style="${rootStyle}">${header}${body}</div>`;
   }
 
   function renderPreviewInto(container, sectionConfig, activeTemplate) {
@@ -1859,6 +2260,9 @@
     renderPreviewInto,
     addEditorRow,
     removeEditorRow,
+    clearEditorField,
+    clearRowField,
+    toggleEditorCheckbox,
     saveEditor,
     backToPicker,
   };

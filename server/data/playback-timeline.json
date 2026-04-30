@@ -3,29 +3,20 @@
     "sections": {
       "1": {
         "section": 1,
-        "cycleId": "1-1776843139610_6zsk36",
-        "syncAt": 1776843142755,
-        "updatedAt": 1776843139750,
-        "fileCount": 1,
-        "mediaSignature": "youtube-KBC_Kiara_Advani_Dieting_l_KBC_New_Season_Full_Episode_l_Vicky-Gw8CZzgY8A0.mp4",
-        "targetDevice": "all"
-      },
-      "2": {
-        "section": 2,
-        "cycleId": "2-cleared-1776844369075",
-        "syncAt": 1776844369075,
-        "updatedAt": 1776844369075,
-        "fileCount": 0,
-        "mediaSignature": "",
+        "cycleId": "1-1777544536436_elwc6o",
+        "syncAt": 1777544539586,
+        "updatedAt": 1777544536568,
+        "fileCount": 7,
+        "mediaSignature": "videoplayback.mp4|videoplayback__4_.mp4|videoplayback__5_.mp4|WhatsApp_Video_2025-08-13_at_11.24.55.mp4|WhatsApp_Video_2025-09-19_at_14.23.37.mp4|WhatsApp_Video_2026-03-27_at_3.01.16_PM.mp4|____WATCH_______________________________________________________________________.mp4",
         "targetDevice": "all"
       },
       "3": {
         "section": 3,
-        "cycleId": "3-cleared-1776844369076",
-        "syncAt": 1776844369076,
-        "updatedAt": 1776844369076,
-        "fileCount": 0,
-        "mediaSignature": "",
+        "cycleId": "3-1777544453204_yp98xf",
+        "syncAt": 1777544456483,
+        "updatedAt": 1777544453475,
+        "fileCount": 5,
+        "mediaSignature": "24_inch_Smart_TV_Data_Sheet__page-001.png|24_inch_Smart_TV_Data_Sheet__page-002.png|24_inch_Smart_TV_Data_Sheet__page-003.png|24_inch_Smart_TV_Data_Sheet__page-004.png|24_inch_Smart_TV_Data_Sheet__page-005.png",
         "targetDevice": "all"
       }
     }
@@ -33,89 +24,27 @@
   "devices": {
     "4aa1624c74676d0b": {
       "sections": {
-        "2": {
-          "section": 2,
-          "cycleId": "2-cleared-1776844369078",
-          "syncAt": 1776844369078,
-          "updatedAt": 1776844369078,
-          "fileCount": 0,
-          "mediaSignature": "",
-          "targetDevice": "4aa1624c74676d0b"
-        },
-        "3": {
-          "section": 3,
-          "cycleId": "3-cleared-1776844369079",
-          "syncAt": 1776844369080,
-          "updatedAt": 1776844369079,
-          "fileCount": 0,
-          "mediaSignature": "",
+        "1": {
+          "section": 1,
+          "cycleId": "1-1777544723907_s0h8hm",
+          "syncAt": 1777544727178,
+          "updatedAt": 1777544724033,
+          "fileCount": 1,
+          "mediaSignature": "BREAD_PAKODA___TEA_COLD_DRINK.png",
           "targetDevice": "4aa1624c74676d0b"
         }
       }
     },
-    "aa57fb14dd658b75": {
+    "a269cccbbe8cfbf1": {
       "sections": {
-        "2": {
-          "section": 2,
-          "cycleId": "2-cleared-1776844369080",
-          "syncAt": 1776844369081,
-          "updatedAt": 1776844369080,
-          "fileCount": 0,
-          "mediaSignature": "",
-          "targetDevice": "aa57fb14dd658b75"
-        },
-        "3": {
-          "section": 3,
-          "cycleId": "3-cleared-1776844369082",
-          "syncAt": 1776844369083,
-          "updatedAt": 1776844369082,
-          "fileCount": 0,
-          "mediaSignature": "",
-          "targetDevice": "aa57fb14dd658b75"
-        }
-      }
-    },
-    "868e5a4be1b038ea": {
-      "sections": {
-        "2": {
-          "section": 2,
-          "cycleId": "2-cleared-1776844369083",
-          "syncAt": 1776844369084,
-          "updatedAt": 1776844369083,
-          "fileCount": 0,
-          "mediaSignature": "",
-          "targetDevice": "868e5a4be1b038ea"
-        },
-        "3": {
-          "section": 3,
-          "cycleId": "3-cleared-1776844369085",
-          "syncAt": 1776844369086,
-          "updatedAt": 1776844369085,
-          "fileCount": 0,
-          "mediaSignature": "",
-          "targetDevice": "868e5a4be1b038ea"
-        }
-      }
-    },
-    "__incoming": {
-      "sections": {
-        "2": {
-          "section": 2,
-          "cycleId": "2-cleared-1776844369132",
-          "syncAt": 1776844369133,
-          "updatedAt": 1776844369132,
-          "fileCount": 0,
-          "mediaSignature": "",
-          "targetDevice": "__incoming"
-        },
-        "3": {
-          "section": 3,
-          "cycleId": "3-cleared-1776844369134",
-          "syncAt": 1776844369134,
-          "updatedAt": 1776844369134,
-          "fileCount": 0,
-          "mediaSignature": "",
-          "targetDevice": "__incoming"
+        "1": {
+          "section": 1,
+          "cycleId": "1-1777544724045_xbse3c",
+          "syncAt": 1777544727178,
+          "updatedAt": 1777544724175,
+          "fileCount": 1,
+          "mediaSignature": "BREAD_PAKODA___TEA_COLD_DRINK.png",
+          "targetDevice": "a269cccbbe8cfbf1"
         }
       }
     }

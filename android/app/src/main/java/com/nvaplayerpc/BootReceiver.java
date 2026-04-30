@@ -1,4 +1,4 @@
-// package com.signageplayertv;
+// package com.nvaplayerpc;
 
 // import android.content.BroadcastReceiver;
 // import android.content.Context;
@@ -16,7 +16,7 @@
 // }
 
 
-package com.signageplayertv;
+package com.nvaplayerpc;
 
 import android.content.BroadcastReceiver;
 import android.content.Context;

@@ -1,4 +1,4 @@
-package com.signageplayertv
+package com.nvaplayerpc
 
 import android.app.AlarmManager
 import android.app.Notification

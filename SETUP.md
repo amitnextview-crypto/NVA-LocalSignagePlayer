@@ -1,4 +1,4 @@
-# SignagePlayerTV Setup Guide
+# NVAPlayerPC Setup Guide
 
 This file is for the person who receives this project in a ZIP file and wants to:
 
@@ -17,9 +17,9 @@ This guide is written in simple step-by-step language so a new person can follow
 This ZIP contains these main parts:
 
 - Android app: main project root
-- Local CMS/server: [server](c:\Android\signageplayertv\server)
-- Android release keystore: [android/app/my-release-key.jks](c:\Android\signageplayertv\android\app\my-release-key.jks)
-- Licence app / website source: [_tmp_new_generator](c:\Android\signageplayertv\_tmp_new_generator)
+- Local CMS/server: [server](d:\am\nvaplayerpc\server)
+- Android release keystore: [android/app/my-release-key.jks](d:\am\nvaplayerpc\android\app\my-release-key.jks)
+- Licence app / website source: [_tmp_new_generator](d:\am\nvaplayerpc\_tmp_new_generator)
 
 ## 2. Before starting
 
@@ -122,9 +122,9 @@ Reason:
 
 Examples:
 
-- `C:\Projects\signageplayertv`
-- `D:\Work\signageplayertv`
-- `E:\Apps\signageplayertv`
+- `C:\Projects\nvaplayerpc`
+- `D:\Work\nvaplayerpc`
+- `E:\Apps\nvaplayerpc`
 
 This project can be kept on `C`, `D`, or `E` drive.
 
@@ -138,7 +138,7 @@ These are the most important machine-specific things in this project.
 
 ### 5.1 Java hardcoded path in Gradle
 
-Open [android/gradle.properties](c:\Android\signageplayertv\android\gradle.properties)
+Open [android/gradle.properties](d:\am\nvaplayerpc\android\gradle.properties)
 
 If you see this line:
 
@@ -178,7 +178,7 @@ If Android build gives Java-related errors, the user should verify that:
 
 Do not remove this file:
 
-[android/app/my-release-key.jks](c:\Android\signageplayertv\android\app\my-release-key.jks)
+[android/app/my-release-key.jks](d:\am\nvaplayerpc\android\app\my-release-key.jks)
 
 Important:
 
@@ -188,7 +188,7 @@ Important:
 
 ### 5.4 Licence server URL inside app
 
-Open [src/services/licenseService.ts](c:\Android\signageplayertv\src\services\licenseService.ts)
+Open [src/services/licenseService.ts](d:\am\nvaplayerpc\src\services\licenseService.ts)
 
 This file currently contains a fixed website URL:
 
@@ -217,7 +217,7 @@ If this is not changed when needed:
 
 ### 5.5 CMS default example IP in app
 
-Open [src/admin/AdminPanel.tsx](c:\Android\signageplayertv\src\admin\AdminPanel.tsx)
+Open [src/admin/AdminPanel.tsx](d:\am\nvaplayerpc\src\admin\AdminPanel.tsx)
 
 There is an example CMS URL:
 
@@ -287,10 +287,10 @@ The user can edit the code directly in VS Code.
 
 Important folders:
 
-- app code: [src](c:\Android\signageplayertv\src)
-- Android native code: [android](c:\Android\signageplayertv\android)
-- CMS/server: [server](c:\Android\signageplayertv\server)
-- licence website: [_tmp_new_generator](c:\Android\signageplayertv\_tmp_new_generator)
+- app code: [src](d:\am\nvaplayerpc\src)
+- Android native code: [android](d:\am\nvaplayerpc\android)
+- CMS/server: [server](d:\am\nvaplayerpc\server)
+- licence website: [_tmp_new_generator](d:\am\nvaplayerpc\_tmp_new_generator)
 
 ## 8. How to run the Android app in development
 
@@ -354,13 +354,13 @@ Check these first:
 1. JDK 17 installed
 2. `JAVA_HOME` correct
 3. `org.gradle.java.home` not forcing a wrong path
-4. [android/app/my-release-key.jks](c:\Android\signageplayertv\android\app\my-release-key.jks) is present
+4. [android/app/my-release-key.jks](d:\am\nvaplayerpc\android\app\my-release-key.jks) is present
 5. `npm install` already run in root
 6. Android Studio setup completed at least once
 
 ## 10. How to run the CMS/server locally
 
-The CMS/server is inside [server](c:\Android\signageplayertv\server).
+The CMS/server is inside [server](d:\am\nvaplayerpc\server).
 
 ### 10.1 Install packages
 
@@ -403,7 +403,7 @@ If video conversion is needed:
 
 Licence website source is here:
 
-[_tmp_new_generator](c:\Android\signageplayertv\_tmp_new_generator)
+[_tmp_new_generator](d:\am\nvaplayerpc\_tmp_new_generator)
 
 This is a separate Next.js project.
 
@@ -427,7 +427,7 @@ These changes are important for the user who wants to use their own licence syst
 
 Open:
 
-[_tmp_new_generator/app/api/login/route.js](c:\Android\signageplayertv\_tmp_new_generator\app\api\login\route.js)
+[_tmp_new_generator/app/api/login/route.js](d:\am\nvaplayerpc\_tmp_new_generator\app\api\login\route.js)
 
 There is a fixed admin login check:
 
@@ -464,7 +464,7 @@ But better practice is:
 
 Open:
 
-[_tmp_new_generator/lib/db.js](c:\Android\signageplayertv\_tmp_new_generator\lib\db.js)
+[_tmp_new_generator/lib/db.js](d:\am\nvaplayerpc\_tmp_new_generator\lib\db.js)
 
 This file reads:
 
@@ -478,7 +478,7 @@ So the user must provide their own MongoDB connection string in environment vari
 
 Open:
 
-[_tmp_new_generator/app/api/generate/route.js](c:\Android\signageplayertv\_tmp_new_generator\app\api\generate\route.js)
+[_tmp_new_generator/app/api/generate/route.js](d:\am\nvaplayerpc\_tmp_new_generator\app\api\generate\route.js)
 
 This uses:
 
@@ -517,7 +517,7 @@ If using MongoDB Atlas:
 
 The user should deploy the folder:
 
-[_tmp_new_generator](c:\Android\signageplayertv\_tmp_new_generator)
+[_tmp_new_generator](d:\am\nvaplayerpc\_tmp_new_generator)
 
 They can:
 
@@ -552,7 +552,7 @@ Example:
 
 After deployment, open:
 
-[src/services/licenseService.ts](c:\Android\signageplayertv\src\services\licenseService.ts)
+[src/services/licenseService.ts](d:\am\nvaplayerpc\src\services\licenseService.ts)
 
 Replace:
 
@@ -586,7 +586,7 @@ The server should have:
 
 ### 14.2 Steps on another server
 
-1. upload the [_tmp_new_generator](c:\Android\signageplayertv\_tmp_new_generator) project to the server
+1. upload the [_tmp_new_generator](d:\am\nvaplayerpc\_tmp_new_generator) project to the server
 2. install dependencies:
 
 ```bash
@@ -637,7 +637,7 @@ Common examples:
 
 Once the custom domain works, update:
 
-[src/services/licenseService.ts](c:\Android\signageplayertv\src\services\licenseService.ts)
+[src/services/licenseService.ts](d:\am\nvaplayerpc\src\services\licenseService.ts)
 
 Example:
 
@@ -658,13 +658,13 @@ If a new user gets the ZIP file, the safest order is:
 5. open Android Studio once and finish setup
 6. extract ZIP on any drive
 7. open project in VS Code
-8. check [android/gradle.properties](c:\Android\signageplayertv\android\gradle.properties) and remove/comment old Java path if needed
-9. make sure [android/app/my-release-key.jks](c:\Android\signageplayertv\android\app\my-release-key.jks) is present
+8. check [android/gradle.properties](d:\am\nvaplayerpc\android\gradle.properties) and remove/comment old Java path if needed
+9. make sure [android/app/my-release-key.jks](d:\am\nvaplayerpc\android\app\my-release-key.jks) is present
 10. run `npm install` in project root
-11. run `npm install` in [server](c:\Android\signageplayertv\server)
-12. if licence website is needed, run `npm install` in [_tmp_new_generator](c:\Android\signageplayertv\_tmp_new_generator)
-13. update [src/services/licenseService.ts](c:\Android\signageplayertv\src\services\licenseService.ts) with their own licence website URL if needed
-14. if using their own licence website, update login email/password in [_tmp_new_generator/app/api/login/route.js](c:\Android\signageplayertv\_tmp_new_generator\app\api\login\route.js)
+11. run `npm install` in [server](d:\am\nvaplayerpc\server)
+12. if licence website is needed, run `npm install` in [_tmp_new_generator](d:\am\nvaplayerpc\_tmp_new_generator)
+13. update [src/services/licenseService.ts](d:\am\nvaplayerpc\src\services\licenseService.ts) with their own licence website URL if needed
+14. if using their own licence website, update login email/password in [_tmp_new_generator/app/api/login/route.js](d:\am\nvaplayerpc\_tmp_new_generator\app\api\login\route.js)
 15. set `SECRET` and `MONGO_URI` on Vercel or on their own server
 16. if needed, install LibreOffice for PPT support
 17. if needed, install ffmpeg for video processing
@@ -678,13 +678,13 @@ Before saying "everything is ready", confirm these:
 - JDK 17 installed
 - Android Studio installed and opened once
 - `JAVA_HOME` correct
-- [android/gradle.properties](c:\Android\signageplayertv\android\gradle.properties) not forcing wrong Java path
-- [android/app/my-release-key.jks](c:\Android\signageplayertv\android\app\my-release-key.jks) present
+- [android/gradle.properties](d:\am\nvaplayerpc\android\gradle.properties) not forcing wrong Java path
+- [android/app/my-release-key.jks](d:\am\nvaplayerpc\android\app\my-release-key.jks) present
 - root `npm install` completed
-- [server](c:\Android\signageplayertv\server) `npm install` completed if CMS needed
-- [_tmp_new_generator](c:\Android\signageplayertv\_tmp_new_generator) `npm install` completed if licence website needed
-- [src/services/licenseService.ts](c:\Android\signageplayertv\src\services\licenseService.ts) updated if using new licence server URL
-- [_tmp_new_generator/app/api/login/route.js](c:\Android\signageplayertv\_tmp_new_generator\app\api\login\route.js) updated with own admin email/password
+- [server](d:\am\nvaplayerpc\server) `npm install` completed if CMS needed
+- [_tmp_new_generator](d:\am\nvaplayerpc\_tmp_new_generator) `npm install` completed if licence website needed
+- [src/services/licenseService.ts](d:\am\nvaplayerpc\src\services\licenseService.ts) updated if using new licence server URL
+- [_tmp_new_generator/app/api/login/route.js](d:\am\nvaplayerpc\_tmp_new_generator\app\api\login\route.js) updated with own admin email/password
 - hosting environment has `SECRET`
 - hosting environment has `MONGO_URI`
 - LibreOffice installed if PPT feature needed

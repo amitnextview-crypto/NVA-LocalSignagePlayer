@@ -1,4 +1,4 @@
-package com.signageplayertv
+package com.nvaplayerpc
 
 import com.facebook.react.ReactActivity
 import com.facebook.react.ReactActivityDelegate
@@ -44,7 +44,7 @@ class MainActivity : ReactActivity() {
     }
   }
 
-  override fun getMainComponentName(): String = "SignagePlayerTV"
+  override fun getMainComponentName(): String = "NVAPlayerPC"
 
   override fun createReactActivityDelegate(): ReactActivityDelegate =
       DefaultReactActivityDelegate(this, mainComponentName, fabricEnabled)

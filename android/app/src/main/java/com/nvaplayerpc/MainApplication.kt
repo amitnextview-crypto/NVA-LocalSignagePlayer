@@ -1,4 +1,4 @@
-package com.signageplayertv
+package com.nvaplayerpc
 
 import android.app.Application
 import com.facebook.react.PackageList
